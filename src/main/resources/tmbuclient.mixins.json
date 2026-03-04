@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"package": "com.tmbu.tmbuclient.mixin",
+	"refmap": "tmbuclient.refmap.json",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"ExampleMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}

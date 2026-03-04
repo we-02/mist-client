@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "tmbuclient",
+	"version": "${version}",
+	"name": "TMBU Client",
+	"description": "gay ass client with patches for grimac",
+	"authors": [
+		"tmbu"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/tmbuclient/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.tmbu.tmbuclient.Main"
+		],
+		"client": [
+			"com.tmbu.tmbuclient.ClientMain"
+		]
+	},
+	"mixins": [
+		"tmbuclient.mixins.json",
+		{
+			"config": "tmbuclient.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.18.4",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

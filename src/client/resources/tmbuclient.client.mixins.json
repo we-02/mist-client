@@ -1,0 +1,15 @@
+{
+	"required": true,
+	"package": "com.tmbu.tmbuclient.mixin.client",
+	"refmap": "tmbuclient.client.refmap.json",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"AbstractContainerScreenAccessor",
+		"AvatarRendererMixin",
+		"EntityRendererMixin",
+		"MixinLocalPlayer"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
