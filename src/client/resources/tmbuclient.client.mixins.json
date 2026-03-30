@@ -10,6 +10,7 @@
 		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
 		"ItemInHandRendererMixin",
+		"LivingEntitySwingMixin",
 		"LocalPlayerAttackMixin",
 		"MixinLocalPlayer",
 		"SkyRendererMixin"

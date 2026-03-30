@@ -12,34 +12,38 @@ import org.lwjgl.glfw.GLFW;
 /**
  * HandView — customize the position, rotation, and scale of your held items.
  *
- * Useful for CPVP to reduce visual clutter from large items blocking your view,
- * or to reposition hands for better crosshair visibility.
+ * Transform order matches Meteor: rotate → scale → translate.
+ * This ensures rotation happens around the hand's local origin (not world origin),
+ * scale applies uniformly, and translate shifts the final result.
  */
 public class HandView extends Module {
 
     // ── Main Hand ────────────────────────────────────────────────────────────
-    private final SliderSetting mainX     = addSetting(new SliderSetting("Main X", 0, -3, 3, 0.1).group("Main Hand"));
-    private final SliderSetting mainY     = addSetting(new SliderSetting("Main Y", 0, -3, 3, 0.1).group("Main Hand"));
-    private final SliderSetting mainZ     = addSetting(new SliderSetting("Main Z", 0, -3, 3, 0.1).group("Main Hand"));
-    private final SliderSetting mainRotX  = addSetting(new SliderSetting("Main Rot X", 0, -180, 180, 1).group("Main Hand"));
-    private final SliderSetting mainRotY  = addSetting(new SliderSetting("Main Rot Y", 0, -180, 180, 1).group("Main Hand"));
-    private final SliderSetting mainRotZ  = addSetting(new SliderSetting("Main Rot Z", 0, -180, 180, 1).group("Main Hand"));
-    private final SliderSetting mainScale = addSetting(new SliderSetting("Main Scale", 1, 0.1, 3, 0.1).group("Main Hand"));
+    private final SliderSetting mainPosX   = addSetting(new SliderSetting("Main Pos X", 0, -3, 3, 0.1).group("Main Hand"));
+    private final SliderSetting mainPosY   = addSetting(new SliderSetting("Main Pos Y", 0, -3, 3, 0.1).group("Main Hand"));
+    private final SliderSetting mainPosZ   = addSetting(new SliderSetting("Main Pos Z", 0, -3, 3, 0.1).group("Main Hand"));
+    private final SliderSetting mainRotX   = addSetting(new SliderSetting("Main Rot X", 0, -180, 180, 1).group("Main Hand"));
+    private final SliderSetting mainRotY   = addSetting(new SliderSetting("Main Rot Y", 0, -180, 180, 1).group("Main Hand"));
+    private final SliderSetting mainRotZ   = addSetting(new SliderSetting("Main Rot Z", 0, -180, 180, 1).group("Main Hand"));
+    private final SliderSetting mainScaleX = addSetting(new SliderSetting("Main Scale X", 1, 0.1, 5, 0.1).group("Main Hand"));
+    private final SliderSetting mainScaleY = addSetting(new SliderSetting("Main Scale Y", 1, 0.1, 5, 0.1).group("Main Hand"));
+    private final SliderSetting mainScaleZ = addSetting(new SliderSetting("Main Scale Z", 1, 0.1, 5, 0.1).group("Main Hand"));
 
     // ── Off Hand ─────────────────────────────────────────────────────────────
-    private final SliderSetting offX      = addSetting(new SliderSetting("Off X", 0, -3, 3, 0.1).group("Off Hand"));
-    private final SliderSetting offY      = addSetting(new SliderSetting("Off Y", 0, -3, 3, 0.1).group("Off Hand"));
-    private final SliderSetting offZ      = addSetting(new SliderSetting("Off Z", 0, -3, 3, 0.1).group("Off Hand"));
-    private final SliderSetting offRotX   = addSetting(new SliderSetting("Off Rot X", 0, -180, 180, 1).group("Off Hand"));
-    private final SliderSetting offRotY   = addSetting(new SliderSetting("Off Rot Y", 0, -180, 180, 1).group("Off Hand"));
-    private final SliderSetting offRotZ   = addSetting(new SliderSetting("Off Rot Z", 0, -180, 180, 1).group("Off Hand"));
-    private final SliderSetting offScale  = addSetting(new SliderSetting("Off Scale", 1, 0.1, 3, 0.1).group("Off Hand"));
+    private final SliderSetting offPosX    = addSetting(new SliderSetting("Off Pos X", 0, -3, 3, 0.1).group("Off Hand"));
+    private final SliderSetting offPosY    = addSetting(new SliderSetting("Off Pos Y", 0, -3, 3, 0.1).group("Off Hand"));
+    private final SliderSetting offPosZ    = addSetting(new SliderSetting("Off Pos Z", 0, -3, 3, 0.1).group("Off Hand"));
+    private final SliderSetting offRotX    = addSetting(new SliderSetting("Off Rot X", 0, -180, 180, 1).group("Off Hand"));
+    private final SliderSetting offRotY    = addSetting(new SliderSetting("Off Rot Y", 0, -180, 180, 1).group("Off Hand"));
+    private final SliderSetting offRotZ    = addSetting(new SliderSetting("Off Rot Z", 0, -180, 180, 1).group("Off Hand"));
+    private final SliderSetting offScaleX  = addSetting(new SliderSetting("Off Scale X", 1, 0.1, 5, 0.1).group("Off Hand"));
+    private final SliderSetting offScaleY  = addSetting(new SliderSetting("Off Scale Y", 1, 0.1, 5, 0.1).group("Off Hand"));
+    private final SliderSetting offScaleZ  = addSetting(new SliderSetting("Off Scale Z", 1, 0.1, 5, 0.1).group("Off Hand"));
 
     // ── General ──────────────────────────────────────────────────────────────
-    private final BooleanSetting oldSwing = addSetting(new BooleanSetting("Old Swing", false).group("General"));
-    private final SliderSetting  swingSpeed = addSetting(new SliderSetting("Swing Speed", 6, 1, 20, 1).group("General"));
+    private final BooleanSetting oldSwing  = addSetting(new BooleanSetting("Old Swing", false).group("General"));
+    private final SliderSetting swingSpeed = addSetting(new SliderSetting("Swing Speed", 6, 0.5, 20, 0.5).group("General"));
 
-    /** Singleton for mixin access. */
     private static HandView instance;
 
     public HandView() {
@@ -49,48 +53,44 @@ public class HandView extends Module {
     }
 
     /**
-     * Called from the mixin to apply transforms to the PoseStack before hand rendering.
+     * Called from mixin at the renderItem call — AFTER all vanilla transforms.
+     * Order: rotate → scale → translate (matches Meteor).
      */
-    public static void applyTransforms(InteractionHand hand, PoseStack poseStack) {
+    public static void applyTransforms(InteractionHand hand, PoseStack ps) {
         if (instance == null || !instance.isEnabled()) return;
 
         if (hand == InteractionHand.MAIN_HAND) {
-            float sx = instance.mainScale.getValue().floatValue();
-            poseStack.translate(
-                instance.mainX.getValue().floatValue(),
-                instance.mainY.getValue().floatValue(),
-                instance.mainZ.getValue().floatValue()
-            );
-            poseStack.mulPose(Axis.XP.rotationDegrees(instance.mainRotX.getValue().floatValue()));
-            poseStack.mulPose(Axis.YP.rotationDegrees(instance.mainRotY.getValue().floatValue()));
-            poseStack.mulPose(Axis.ZP.rotationDegrees(instance.mainRotZ.getValue().floatValue()));
-            poseStack.scale(sx, sx, sx);
+            // Rotate
+            ps.mulPose(Axis.XP.rotationDegrees(instance.mainRotX.getValue().floatValue()));
+            ps.mulPose(Axis.YP.rotationDegrees(instance.mainRotY.getValue().floatValue()));
+            ps.mulPose(Axis.ZP.rotationDegrees(instance.mainRotZ.getValue().floatValue()));
+            // Scale
+            ps.scale(instance.mainScaleX.getValue().floatValue(),
+                     instance.mainScaleY.getValue().floatValue(),
+                     instance.mainScaleZ.getValue().floatValue());
+            // Translate
+            ps.translate(instance.mainPosX.getValue().floatValue(),
+                         instance.mainPosY.getValue().floatValue(),
+                         instance.mainPosZ.getValue().floatValue());
         } else {
-            float sx = instance.offScale.getValue().floatValue();
-            poseStack.translate(
-                instance.offX.getValue().floatValue(),
-                instance.offY.getValue().floatValue(),
-                instance.offZ.getValue().floatValue()
-            );
-            poseStack.mulPose(Axis.XP.rotationDegrees(instance.offRotX.getValue().floatValue()));
-            poseStack.mulPose(Axis.YP.rotationDegrees(instance.offRotY.getValue().floatValue()));
-            poseStack.mulPose(Axis.ZP.rotationDegrees(instance.offRotZ.getValue().floatValue()));
-            poseStack.scale(sx, sx, sx);
+            ps.mulPose(Axis.XP.rotationDegrees(instance.offRotX.getValue().floatValue()));
+            ps.mulPose(Axis.YP.rotationDegrees(instance.offRotY.getValue().floatValue()));
+            ps.mulPose(Axis.ZP.rotationDegrees(instance.offRotZ.getValue().floatValue()));
+            ps.scale(instance.offScaleX.getValue().floatValue(),
+                     instance.offScaleY.getValue().floatValue(),
+                     instance.offScaleZ.getValue().floatValue());
+            ps.translate(instance.offPosX.getValue().floatValue(),
+                         instance.offPosY.getValue().floatValue(),
+                         instance.offPosZ.getValue().floatValue());
         }
     }
 
-    /**
-     * Whether to use old 1.8-style swing animation.
-     */
     public static boolean useOldSwing() {
         return instance != null && instance.isEnabled() && instance.oldSwing.getValue();
     }
 
-    /**
-     * Custom swing speed (vanilla is 6).
-     */
     public static int getSwingSpeed() {
         return instance != null && instance.isEnabled()
-            ? instance.swingSpeed.getValue().intValue() : 6;
+            ? Math.round(instance.swingSpeed.getValue().floatValue()) : 6;
     }
 }
