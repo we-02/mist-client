@@ -10,4 +10,9 @@ public class ColorSetting extends Setting<Integer> {
 	public void setColor(int color) { setValue(color); }
 
 	public int getDefaultColor() { return getDefault(); }
+
+	@Override
+	public void deserialize(Object raw) {
+		if (raw instanceof Number n) setValue(n.intValue());
+	}
 }

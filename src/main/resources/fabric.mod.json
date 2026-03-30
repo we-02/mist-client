@@ -2,8 +2,8 @@
 	"schemaVersion": 1,
 	"id": "tmbuclient",
 	"version": "${version}",
-	"name": "TMBU Client",
-	"description": "gay ass client with patches for grimac",
+	"name": "Mist Client",
+	"description": "Crystal PvP utility client",
 	"authors": [
 		"tmbu"
 	],

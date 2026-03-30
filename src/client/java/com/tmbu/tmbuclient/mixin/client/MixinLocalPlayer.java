@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.mixin.client;
 
-import com.tmbu.tmbuclient.TmbuClient;
-import com.tmbu.tmbuclient.module.impl.AutoCrystal;
+import com.tmbu.tmbuclient.event.EventBus;
+import com.tmbu.tmbuclient.event.events.PreMotionEvent;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,11 +16,6 @@ public class MixinLocalPlayer {
 	private void onPreMotion(CallbackInfo ci) {
 		Minecraft client = Minecraft.getInstance();
 		if (client.player == null) return;
-
-		for (var module : TmbuClient.INSTANCE.getModuleManager().getModules()) {
-			if (module instanceof AutoCrystal ac && ac.isEnabled()) {
-				ac.onPreMotion(client);
-			}
-		}
+		EventBus.INSTANCE.post(new PreMotionEvent(client));
 	}
 }

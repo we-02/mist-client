@@ -8,4 +8,9 @@ public class BooleanSetting extends Setting<Boolean> {
 	public void toggle() {
 		setValue(!getValue());
 	}
+
+	@Override
+	public void deserialize(Object raw) {
+		if (raw instanceof Boolean b) setValue(b);
+	}
 }

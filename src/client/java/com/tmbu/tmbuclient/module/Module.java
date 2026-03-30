@@ -1,5 +1,6 @@
 package com.tmbu.tmbuclient.module;
 
+import com.tmbu.tmbuclient.event.EventBus;
 import com.tmbu.tmbuclient.settings.KeybindSetting;
 import com.tmbu.tmbuclient.settings.Setting;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
@@ -53,7 +54,9 @@ public abstract class Module {
 		this.enabled = enabled;
 		if (enabled) {
 			onEnable();
+			registerEvents(EventBus.INSTANCE);
 		} else {
+			unregisterEvents(EventBus.INSTANCE);
 			onDisable();
 		}
 
@@ -84,6 +87,20 @@ public abstract class Module {
 	}
 
 	public void onWorldRender(WorldRenderContext context) {
+	}
+
+	/**
+	 * Override to subscribe to EventBus events when the module is enabled.
+	 * Called automatically after onEnable().
+	 */
+	protected void registerEvents(EventBus bus) {
+	}
+
+	/**
+	 * Override to unsubscribe from EventBus events when the module is disabled.
+	 * Called automatically before onDisable().
+	 */
+	protected void unregisterEvents(EventBus bus) {
 	}
 
 	protected <T extends Setting<?>> T addSetting(T setting) {

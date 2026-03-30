@@ -14,4 +14,9 @@ public class KeybindSetting extends Setting<Integer> {
 		}
 		return InputConstants.Type.KEYSYM.getOrCreate(key).getDisplayName().getString();
 	}
+
+	@Override
+	public void deserialize(Object raw) {
+		if (raw instanceof Number n) setValue(n.intValue());
+	}
 }

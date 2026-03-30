@@ -1,8 +1,8 @@
 package com.tmbu.tmbuclient.mixin.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.tmbu.tmbuclient.TmbuClient;
-import com.tmbu.tmbuclient.module.impl.NametagsModule;
+import com.tmbu.tmbuclient.event.EventBus;
+import com.tmbu.tmbuclient.event.events.NameTagRenderEvent;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.entity.player.AvatarRenderer;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
@@ -15,7 +15,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(AvatarRenderer.class)
 public class AvatarRendererMixin {
 
-	@Inject(method = "submitNameTag", at = @At("HEAD"), cancellable = true)
+	// AvatarRenderer inherits submitNameTag from EntityRenderer.
+	// The EntityRendererMixin already handles suppression for all entity renderers.
+	// This mixin is kept as a safety net in case AvatarRenderer overrides it in the future.
+	@Inject(method = "submitNameTag", at = @At("HEAD"), cancellable = true, require = 0)
 	private void suppressVanillaNameTag(
 		AvatarRenderState avatarRenderState,
 		PoseStack poseStack,
@@ -23,11 +26,9 @@ public class AvatarRendererMixin {
 		CameraRenderState cameraRenderState,
 		CallbackInfo ci
 	) {
-		for (var module : TmbuClient.INSTANCE.getModuleManager().getModules()) {
-			if (module instanceof NametagsModule && module.isEnabled()) {
-				ci.cancel();
-				return;
-			}
+		NameTagRenderEvent event = EventBus.INSTANCE.post(new NameTagRenderEvent());
+		if (event.isCancelled()) {
+			ci.cancel();
 		}
 	}
 }

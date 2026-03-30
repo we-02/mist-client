@@ -5,12 +5,13 @@ import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.module.ModuleManager;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
-import com.tmbu.tmbuclient.settings.ColorSetting;          // <-- ADDED
+import com.tmbu.tmbuclient.settings.ColorSetting;
+import com.tmbu.tmbuclient.settings.EnumSetting;
 import com.tmbu.tmbuclient.settings.KeybindSetting;
 import com.tmbu.tmbuclient.settings.ModeSetting;
 import com.tmbu.tmbuclient.settings.Setting;
 import com.tmbu.tmbuclient.settings.SliderSetting;
-import net.minecraft.client.Minecraft;                       // <-- ADDED (used in handleSettingClick)
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
@@ -33,6 +34,7 @@ public class ClickGuiScreen extends Screen {
 	private static final int HEADER_H       = 32;
 	private static final int SEARCH_H       = 24;
 	private static final int SETTINGS_COL_W = 160;
+	private static final int GROUP_H        = 16;
 	private static final int PANEL_W        = 500;
 	private static final int PANEL_H        = 340;
 	private static final int MIN_MARGIN     = 14;
@@ -81,7 +83,6 @@ public class ClickGuiScreen extends Screen {
 	private int dragSliderTrackWidth;
 
 	private KeybindSetting bindingSetting;
-	private ColorSetting   currentColorSetting;          // <-- ADDED
 
 	private int     panelX, panelY, panelW, panelH;
 	private boolean panelPositionLoaded;
@@ -95,7 +96,6 @@ public class ClickGuiScreen extends Screen {
 	// Settings panel scroll fields
 	private float settingsScroll   = 0F;
 	private float settingsScrollVelocity = 0F;
-	private int   settingsContentHeight  = 0;
 
 	private long  openStartNanos = -1L;
 	private float lastScale      = 1.0F;
@@ -106,18 +106,18 @@ public class ClickGuiScreen extends Screen {
 	static {
 		for (Category c : Category.values()) {
 			String icon = switch (c.name()) {
-				case "COMBAT"   -> "⚔ ";
-				case "MOVEMENT" -> "✦ ";
-				case "RENDER"   -> "◉ ";
-				case "WORLD"    -> "⬡ ";
-					default         -> "• ";
+				case "COMBAT"   -> "> ";
+				case "MOVEMENT" -> "> ";
+				case "RENDER"   -> "> ";
+				case "MISC"     -> "> ";
+				default         -> "> ";
 			};
 			CAT_ICONS.put(c, icon);
 		}
 	}
 
 	public ClickGuiScreen(ModuleManager moduleManager) {
-		super(Component.literal("TMBU"));
+		super(Component.literal("Mist"));
 		this.moduleManager = moduleManager;
 		this.accent = moduleManager.getAccentColor();
 		colorPicker.setFromColor(accent);
@@ -212,9 +212,9 @@ public class ClickGuiScreen extends Screen {
 		g.fill(px, py, px + pw / 3, py + HEADER_H, withAlpha(0x08FFFFFF, a));
 		g.fill(px, py + HEADER_H - 1, px + pw, py + HEADER_H, withAlpha(accent, a * 0.6F));
 
-		g.drawString(font, "TMBU Client", px + 10, py + 11, withAlpha(COL_TEXT, a), false);
+		g.drawString(font, "Mist Client", px + 10, py + 11, withAlpha(COL_TEXT, a), false);
 		g.drawString(font, selectedCategory.getDisplayName(),
-			px + 10 + font.width("TMBU Client") + 8, py + 12, withAlpha(accent, a * 0.8F), false);
+			px + 10 + font.width("Mist Client") + 8, py + 12, withAlpha(accent, a * 0.8F), false);
 
 		int swatchX = px + pw - 52;
 		int swatchY = py + 8;
@@ -375,7 +375,21 @@ public class ClickGuiScreen extends Screen {
 				g.fill(x + 6, curY, x + w - 6, curY + 1, withAlpha(COL_SEPARATOR, a));
 
 			if (settingsPanelModule == null && exCur > 0.01F) {
+				String lastGrp = null;
 				for (Setting<?> s : mod.getSettings()) {
+					if (!s.isVisible()) continue;
+					String grp = s.getGroup();
+					if (grp != null && !grp.equals(lastGrp)) {
+						int gh = (int)(GROUP_H * exCur);
+						if (gh >= 2) {
+							g.fill(x + 2, curY, x + w, curY + gh, withAlpha(0xFF0D0D14, a * exCur));
+							g.fill(x + 6, curY + gh - 1, x + w - 6, curY + gh, withAlpha(accent, a * exCur * 0.3F));
+							g.drawString(font, "▸ " + grp, x + 6, curY + 2, withAlpha(accent, a * exCur * 0.9F), false);
+						}
+						curY += gh;
+						contentHeight += gh;
+						lastGrp = grp;
+					}
 					int sh = (int)(SETTING_H * exCur);
 					if (sh < 2) continue;
 					boolean shov = isIn(mx, my + (int) scrollOffset, x + 2, curY + (int) scrollOffset, w - 2, sh);
@@ -441,26 +455,42 @@ public class ClickGuiScreen extends Screen {
 		g.enableScissor(x + 2, settingsStartY, x + w - 2, y + h - 2);
 
 		List<Setting<?>> settingList = settingsPanelModule.getSettings();
-		int settingsCount = settingList.size();
 
-		// First pass: compute total height and store row heights
+		// First pass: compute total height including group headers, skipping hidden settings
 		int totalHeight = 0;
-		List<Integer> rowHeights = new ArrayList<>();
+		List<Object> renderItems = new ArrayList<>(); // String = group header, Setting = setting row
+		String lastGroup = null;
 		for (Setting<?> s : settingList) {
-			int rowHeight = computeSettingRowHeight(s, w - 18); // w - 18 accounts for reset button
-			rowHeights.add(rowHeight);
-			totalHeight += rowHeight;
+			if (!s.isVisible()) continue;
+			String grp = s.getGroup();
+			if (grp != null && !grp.equals(lastGroup)) {
+				renderItems.add(grp);
+				totalHeight += GROUP_H;
+				lastGroup = grp;
+			}
+			renderItems.add(s);
+			totalHeight += computeSettingRowHeight(s, w - 18);
 		}
-		settingsContentHeight = totalHeight;
 
 		// Clamp scroll
 		settingsScroll = Mth.clamp(settingsScroll, 0, Math.max(0, totalHeight - (y + h - settingsStartY - 2)));
 
 		int curY = settingsStartY - (int) settingsScroll;
-		int settingIndex = 0;
+		int itemIndex = 0;
 
-		for (Setting<?> s : settingList) {
-			int rowHeight = rowHeights.get(settingIndex);
+		for (Object item : renderItems) {
+			if (item instanceof String groupName) {
+				// Render group header
+				g.fill(x + 2, curY, x + w, curY + GROUP_H, withAlpha(0xFF0D0D14, a));
+				g.fill(x + 6, curY + GROUP_H - 1, x + w - 6, curY + GROUP_H, withAlpha(accent, a * 0.3F));
+				g.drawString(font, "▸ " + groupName, x + 6, curY + 4, withAlpha(accent, a * 0.9F), false);
+				curY += GROUP_H;
+				itemIndex++;
+				continue;
+			}
+
+			Setting<?> s = (Setting<?>) item;
+			int rowHeight = computeSettingRowHeight(s, w - 18);
 			int resetX = x + w - 14;
 
 			// background
@@ -478,11 +508,14 @@ public class ClickGuiScreen extends Screen {
 			renderSettingRow(g, s, settingsPanelModule, x + 2, curY, w - 18, rowHeight, mx, my, a);
 
 			curY += rowHeight;
-			settingIndex++;
+			itemIndex++;
 
 			// separator between settings (skip after last)
-			if (settingIndex < settingsCount) {
-				g.fill(x + 6, curY - 1, x + w - 6, curY, withAlpha(COL_SEPARATOR, a * 0.5F));
+			if (itemIndex < renderItems.size()) {
+				Object next = renderItems.get(itemIndex);
+				if (!(next instanceof String)) {
+					g.fill(x + 6, curY - 1, x + w - 6, curY, withAlpha(COL_SEPARATOR, a * 0.5F));
+				}
 			}
 		}
 
@@ -619,7 +652,21 @@ public class ClickGuiScreen extends Screen {
 				withAlpha(COL_TEXT_DIM, a), false);
 		}
 
-		// ─── NEW: ColorSetting rendering ─────────────────────────────────────────
+		if (s instanceof EnumSetting<?> es) {
+			int totalNameHeight = nameLines.size() * 10;
+			int nameY = y + (h - totalNameHeight) / 2;
+			for (String line : nameLines) {
+				g.drawString(font, line, nameX, nameY, withAlpha(COL_TEXT, a), false);
+				nameY += 10;
+			}
+
+			String mode = "‹ " + es.getMode() + " ›";
+			g.drawString(font, mode, x + uw - font.width(mode) - 4, y + (h - 10) / 2,
+				withAlpha(COL_TEXT_DIM, a), false);
+			return;
+		}
+
+		// ─── ColorSetting rendering ──────────────────────────────────────────────
 		if (s instanceof ColorSetting cs) {
 			// Draw name lines (centered vertically)
 			int totalNameHeight = nameLines.size() * 10;
@@ -784,7 +831,14 @@ public class ClickGuiScreen extends Screen {
 
 			float exCur = expandAnim.getOrDefault(mod, expanded.getOrDefault(mod, false) ? 1.0F : 0.0F);
 			if (settingsPanelModule == null && exCur > 0.01F) {
+				String lastGrp = null;
 				for (Setting<?> s : mod.getSettings()) {
+					if (!s.isVisible()) continue;
+					String grp = s.getGroup();
+					if (grp != null && !grp.equals(lastGrp)) {
+						curY += (int)(GROUP_H * exCur);
+						lastGrp = grp;
+					}
 					int sh = (int)(SETTING_H * exCur);
 					if (sh < 2) { curY += sh; continue; }
 					if (isIn(mx, my, listX + 2, curY, listW - 2, sh)) {
@@ -814,22 +868,26 @@ public class ClickGuiScreen extends Screen {
 		if (settingsPanelModule == null || btn != GLFW.GLFW_MOUSE_BUTTON_LEFT) return;
 
 		int settingsStartY = settingsPanelContentStartY();
-		int adjustedMy = my + (int) settingsScroll; // adjust for scroll
+		int adjustedMy = my + (int) settingsScroll;
 
-		List<Setting<?>> settings = settingsPanelModule.getSettings();
-		int availableWidth = SETTINGS_COL_W - 18; // same as in render: w - 18
-		List<Integer> rowHeights = new ArrayList<>();
-		for (Setting<?> s : settings) {
-			rowHeights.add(computeSettingRowHeight(s, availableWidth));
-		}
+		// Build the same render items list as the render pass
+		List<Setting<?>> allSettings = settingsPanelModule.getSettings();
+		int availableWidth = SETTINGS_COL_W - 18;
+		String lastGroup = null;
 
 		int settingY = settingsStartY;
-		for (int i = 0; i < settings.size(); i++) {
-			Setting<?> s = settings.get(i);
-			int rowHeight = rowHeights.get(i);
+		for (Setting<?> s : allSettings) {
+			if (!s.isVisible()) continue;
+
+			String grp = s.getGroup();
+			if (grp != null && !grp.equals(lastGroup)) {
+				settingY += GROUP_H; // skip group header
+				lastGroup = grp;
+			}
+
+			int rowHeight = computeSettingRowHeight(s, availableWidth);
 
 			if (adjustedMy >= settingY && adjustedMy < settingY + rowHeight) {
-				// Reset button hit detection
 				int resetX = spX + SETTINGS_COL_W - 14;
 				int resetY = settingY - (int) settingsScroll + (rowHeight - 12) / 2;
 				if (isIn(mx, my, resetX, resetY + 2, 12, 12)) {
@@ -837,7 +895,6 @@ public class ClickGuiScreen extends Screen {
 					moduleManager.requestSave();
 					return;
 				}
-				// Pass the click to the setting itself
 				handleSettingClick(s, btn, mx, spX + 2, SETTINGS_COL_W - 4, settingsPanelModule, adjustedMy);
 				return;
 			}
@@ -856,14 +913,13 @@ public class ClickGuiScreen extends Screen {
 		}
 		else if (s instanceof KeybindSetting ks) { bindingSetting = ks; }
 		else if (s instanceof ModeSetting ms)    { ms.next(); moduleManager.requestSave(); }
-		// ─── NEW: ColorSetting click handling ───────────────────────────────────
+		else if (s instanceof EnumSetting<?> es) { es.next(); moduleManager.requestSave(); }
+		// ─── ColorSetting click handling ────────────────────────────────────────
 		else if (s instanceof ColorSetting cs) {
-			currentColorSetting = cs;
 			Minecraft.getInstance().setScreen(new ColorPickerScreen(cs.getValue(),
 				newColor -> {
 					cs.setValue(newColor);
 					moduleManager.requestSave();
-					currentColorSetting = null;
 				}));
 		}
 	}

@@ -16,29 +16,25 @@ import org.lwjgl.glfw.GLFW;
 public class AutoTotemHover extends Module {
 
     private final SliderSetting hotbarSlot = addSetting(
-            new SliderSetting("Hotbar Slot", 0, 0, 9, 1));
+            new SliderSetting("Hotbar Slot", 0, 0, 9, 1).group("General"));
 
     private final SliderSetting baseDelay = addSetting(
-            new SliderSetting("Base Delay", 5, 1, 20, 1));
+            new SliderSetting("Base Delay", 5, 1, 20, 1).group("Timing"));
 
     private final BooleanSetting dynamicDelay = addSetting(
-            new BooleanSetting("Dynamic Delay", true));
+            new BooleanSetting("Dynamic Delay", true).group("Timing"));
 
     private final SliderSetting dynamicDelayMax = addSetting(
-            new SliderSetting("Dynamic Delay Max", 10, 0, 40, 1));
+            new SliderSetting("Dynamic Delay Max", 10, 0, 40, 1).group("Timing").visibleWhen(dynamicDelay::getValue));
 
     private final BooleanSetting jitter = addSetting(
-            new BooleanSetting("Jitter", false));
+            new BooleanSetting("Jitter", false).group("Timing"));
 
     private final SliderSetting jitterMax = addSetting(
-            new SliderSetting("Jitter Max", 3, 1, 10, 1));
+            new SliderSetting("Jitter Max", 3, 1, 10, 1).group("Timing").visibleWhen(jitter::getValue));
 
-    // When enabled, all totem swaps are suppressed while the player is holding
-    // a shield in either hand. A player actively blocking is unlikely to need
-    // an immediate totem swap, and suppressing here avoids interfering with the
-    // blocking animation or accidental slot changes during a block window.
     private final BooleanSetting stopOnShield = addSetting(
-            new BooleanSetting("Stop On Shield", true));
+            new BooleanSetting("Stop On Shield", true).group("General"));
 
     // BUG FIX 1: Track in-flight state so we never double-fire before the
     // server has acknowledged the previous swap. Without this, rapid swaps

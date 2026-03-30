@@ -29,7 +29,13 @@ public class SliderSetting extends Setting<Double> {
 	public double getMax() {
 		return max;
 	}
+
 	public double getStep() {
 		return step;
+	}
+
+	@Override
+	public void deserialize(Object raw) {
+		if (raw instanceof Number n) setValue(n.doubleValue());
 	}
 }

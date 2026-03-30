@@ -23,4 +23,21 @@ public class EnumSetting<E extends Enum<E>> extends Setting<E> {
     public String getMode() {
         return getValue().name();
     }
+
+    @Override
+    public Object serialize() {
+        return getValue().name();
+    }
+
+    @Override
+    public void deserialize(Object raw) {
+        if (raw instanceof String s) {
+            for (E constant : constants) {
+                if (constant.name().equals(s)) {
+                    setValue(constant);
+                    return;
+                }
+            }
+        }
+    }
 }

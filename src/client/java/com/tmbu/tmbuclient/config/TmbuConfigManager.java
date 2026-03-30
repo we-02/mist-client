@@ -7,11 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.tmbu.tmbuclient.module.Module;
-import com.tmbu.tmbuclient.settings.BooleanSetting;
-import com.tmbu.tmbuclient.settings.KeybindSetting;
-import com.tmbu.tmbuclient.settings.ModeSetting;
 import com.tmbu.tmbuclient.settings.Setting;
-import com.tmbu.tmbuclient.settings.SliderSetting;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -24,7 +20,7 @@ import java.util.List;
 
 public final class TmbuConfigManager {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final String FILE_NAME = "tmbuclient.json";
+	private static final String FILE_NAME = "mistclient.json";
 	private static final int VERSION = 1;
 
 	public Path getConfigPath() {
@@ -83,19 +79,13 @@ public final class TmbuConfigManager {
 					JsonElement value = settingsJson.get(setting.getName());
 					if (value == null || !value.isJsonPrimitive()) continue;
 
-					if (setting instanceof BooleanSetting bs && value.getAsJsonPrimitive().isBoolean()) {
-						bs.setValue(value.getAsBoolean());
-					} else if (setting instanceof SliderSetting ss && value.getAsJsonPrimitive().isNumber()) {
-						ss.setValue(value.getAsDouble());
-					} else if (setting instanceof KeybindSetting ks && value.getAsJsonPrimitive().isNumber()) {
-						ks.setValue(value.getAsInt());
-					} else if (setting instanceof ModeSetting ms && value.getAsJsonPrimitive().isString()) {
-						ms.setValue(value.getAsString());
-					}
+					// Use the setting's own deserialize method — no type checks needed
+					Object raw = jsonPrimitiveToObject(value);
+					setting.deserialize(raw);
 				}
 			}
 		} catch (Exception e) {
-			System.err.println("[tmbuclient] Failed to load config: " + e.getMessage());
+			System.err.println("[mistclient] Failed to load config: " + e.getMessage());
 		}
 	}
 
@@ -130,10 +120,10 @@ public final class TmbuConfigManager {
 
 			JsonObject settingsJson = new JsonObject();
 			for (Setting<?> setting : module.getSettings()) {
-				Object v = setting.getValue();
+				// Use the setting's own serialize method — no type checks needed
+				Object v = setting.serialize();
 				if      (v instanceof Boolean b) settingsJson.addProperty(setting.getName(), b);
-				else if (v instanceof Integer i) settingsJson.addProperty(setting.getName(), i);
-				else if (v instanceof Double  d) settingsJson.addProperty(setting.getName(), d);
+				else if (v instanceof Number  n) settingsJson.addProperty(setting.getName(), n);
 				else if (v instanceof String  s) settingsJson.addProperty(setting.getName(), s);
 			}
 			moduleJson.add("settings", settingsJson);
@@ -149,9 +139,21 @@ public final class TmbuConfigManager {
 			try {
 				Files.writeString(path, GSON.toJson(root), StandardCharsets.UTF_8);
 			} catch (IOException ex) {
-				System.err.println("[tmbuclient] Failed to save config: " + ex.getMessage());
+				System.err.println("[mistclient] Failed to save config: " + ex.getMessage());
 			}
 		}
+	}
+
+	/**
+	 * Convert a JsonElement primitive to a plain Java object for setting deserialization.
+	 */
+	private static Object jsonPrimitiveToObject(JsonElement element) {
+		if (!element.isJsonPrimitive()) return null;
+		var prim = element.getAsJsonPrimitive();
+		if (prim.isBoolean()) return prim.getAsBoolean();
+		if (prim.isNumber())  return prim.getAsNumber();
+		if (prim.isString())  return prim.getAsString();
+		return null;
 	}
 
 	public interface ConfigSink {

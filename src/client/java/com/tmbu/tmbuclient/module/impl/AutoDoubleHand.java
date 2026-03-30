@@ -56,33 +56,37 @@ public class AutoDoubleHand extends Module {
 
     private boolean belowHealth = false;
     private boolean offhandHasNoTotem = false;
+    private int previousSlot = -1; // for restoring after totem switch
+    private int restoreCountdown = 0;
 
     public AutoDoubleHand() {
         super("AutoDoubleHand", "Automatically switches to your totem when you're about to pop", Category.COMBAT, -1);
 
-        stopOnCrystal  = addSetting(new BooleanSetting("Stop On Crystal", true));
-        checkShield    = addSetting(new BooleanSetting("Check Shield", true));
-        onPop          = addSetting(new BooleanSetting("On Pop", false));
-        onHealth       = addSetting(new BooleanSetting("On Health", false));
-        predict        = addSetting(new BooleanSetting("Predict Damage", true));
-        health         = addSetting(new SliderSetting("Health", 2, 1, 20, 1));
-        onGround       = addSetting(new BooleanSetting("On Ground", false));
-        checkPlayers   = addSetting(new BooleanSetting("Check Players", true));
-        distance       = addSetting(new SliderSetting("Distance", 5, 1, 10, 0.1));
-        predictCrystals = addSetting(new BooleanSetting("Predict Crystals", false));
-        checkAim       = addSetting(new BooleanSetting("Check Aim", true));
-        checkItems     = addSetting(new BooleanSetting("Check Items", true));
-        activatesAbove = addSetting(new SliderSetting("Activates Above", 0.2, 0, 4, 0.1));
-        reduceStrictness = addSetting(new BooleanSetting("Reduce Strictness", true));
-        includeAnchor  = addSetting(new BooleanSetting("Include Anchor", true));
+        stopOnCrystal  = addSetting(new BooleanSetting("Stop On Crystal", true).group("General"));
+        checkShield    = addSetting(new BooleanSetting("Check Shield", true).group("General"));
+        onPop          = addSetting(new BooleanSetting("On Pop", false).group("Triggers"));
+        onHealth       = addSetting(new BooleanSetting("On Health", false).group("Triggers"));
+        predict        = addSetting(new BooleanSetting("Predict Damage", true).group("Triggers"));
+        health         = addSetting(new SliderSetting("Health", 2, 1, 20, 1).group("Triggers").visibleWhen(onHealth::getValue));
+        onGround       = addSetting(new BooleanSetting("On Ground", false).group("Conditions"));
+        checkPlayers   = addSetting(new BooleanSetting("Check Players", true).group("Conditions"));
+        distance       = addSetting(new SliderSetting("Distance", 5, 1, 10, 0.1).group("Conditions").visibleWhen(checkPlayers::getValue));
+        predictCrystals = addSetting(new BooleanSetting("Predict Crystals", false).group("Prediction"));
+        checkAim       = addSetting(new BooleanSetting("Check Aim", true).group("Prediction").visibleWhen(predictCrystals::getValue));
+        checkItems     = addSetting(new BooleanSetting("Check Items", true).group("Prediction").visibleWhen(predictCrystals::getValue));
+        activatesAbove = addSetting(new SliderSetting("Activates Above", 0.2, 0, 4, 0.1).group("Conditions"));
+        reduceStrictness = addSetting(new BooleanSetting("Reduce Strictness", true).group("General"));
+        includeAnchor  = addSetting(new BooleanSetting("Include Anchor", true).group("Anchors"));
         anchorMode     = addSetting(new ModeSetting("Anchor Mode", AnchorMode.CRITICAL.name(),
-                new String[]{"ALWAYS", "CRITICAL"}));
+                new String[]{"ALWAYS", "CRITICAL"}).group("Anchors").visibleWhen(includeAnchor::getValue));
     }
 
     @Override
     public void onEnable() {
         belowHealth = false;
         offhandHasNoTotem = false;
+        previousSlot = -1;
+        restoreCountdown = 0;
     }
 
     private boolean isHoldingShield(LocalPlayer player) {
@@ -92,26 +96,34 @@ public class AutoDoubleHand extends Module {
 
     /**
      * Returns true if AutoCrystal is actively placing crystals right now.
-     * Uses the static activeInstance on AutoCrystal — it is non-null only while
-     * AutoCrystal is enabled AND has successfully placed at least once this
-     * session, which is a much tighter signal than just isEnabled().
-     *
-     * We check placeTimer directly: if it has NOT elapsed its delay the module
-     * is considered to be in an active placing window.
      */
     private boolean isAutoCrystalPlacing() {
         AutoCrystal ac = AutoCrystal.activeInstance;
-        if (ac == null) return false;
-        // placeTimer.hasTimeElapsed returns true when the cooldown is over.
-        // If it has NOT elapsed, AutoCrystal is still within its place window —
-        // i.e. it just placed and is cooling down, which means it is actively running.
-        return !ac.placeTimer.hasTimeElapsed(ac.placeDelay.getValue().longValue(), false);
+        return ac != null && ac.isActivelyPlacing();
     }
 
     @Override
     public void onTick(Minecraft client) {
         LocalPlayer player = client.player;
         if (player == null) return;
+
+        // Restore previous slot after a brief delay (let the danger pass)
+        if (restoreCountdown > 0) {
+            restoreCountdown--;
+            if (restoreCountdown == 0 && previousSlot != -1) {
+                // Only restore if we're still on the totem slot and danger has passed
+                if (player.getMainHandItem().is(Items.TOTEM_OF_UNDYING)) {
+                    player.getInventory().setSelectedSlot(previousSlot);
+                }
+                previousSlot = -1;
+            }
+        }
+
+        // Don't switch slots while AutoTotemRefill has the inventory locked
+        if (manager != null) {
+            AutoTotemRefill refill = manager.getModule(AutoTotemRefill.class);
+            if (refill != null && refill.isEnabled() && refill.isLocking()) return;
+        }
 
         // Stop while AutoCrystal is actively placing crystals.
         if (stopOnCrystal.getValue() && isAutoCrystalPlacing()) return;
@@ -253,6 +265,11 @@ public class AutoDoubleHand extends Module {
     private void safeSelectSlot(Minecraft client, int slot) {
         if (client.player == null) return;
         if (slot >= 0 && slot <= 8) {
+            int current = client.player.getInventory().getSelectedSlot();
+            if (current != slot) {
+                previousSlot = current;
+                restoreCountdown = 10; // restore after 0.5 seconds if danger passes
+            }
             client.player.getInventory().setSelectedSlot(slot);
         }
     }

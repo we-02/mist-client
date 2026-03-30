@@ -6,6 +6,7 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"AvatarRendererMixin",
+		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
 		"MixinLocalPlayer"
 	],

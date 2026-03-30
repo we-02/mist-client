@@ -13,9 +13,9 @@ import net.minecraft.world.item.Items;
 import org.lwjgl.glfw.GLFW;
 
 public class PearlFeet extends Module {
-    private final BooleanSetting autoSwitch = addSetting(new BooleanSetting("Auto Switch", true));
-    private final BooleanSetting switchBack = addSetting(new BooleanSetting("Switch Back", true));
-    private final SliderSetting throwDelay = addSetting(new SliderSetting("Throw Delay", 0, 0, 200, 5));
+    private final BooleanSetting autoSwitch = addSetting(new BooleanSetting("Auto Switch", true).group("Switching"));
+    private final BooleanSetting switchBack = addSetting(new BooleanSetting("Switch Back", true).group("Switching"));
+    private final SliderSetting throwDelay = addSetting(new SliderSetting("Throw Delay", 0, 0, 200, 5).group("Timing"));
     private final TimerUtils timer = new TimerUtils();
     private boolean thrown = false;
     private Integer previousSlot = null;

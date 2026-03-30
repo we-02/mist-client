@@ -3,10 +3,8 @@ package com.tmbu.tmbuclient.module;
 import com.tmbu.tmbuclient.config.ClickGuiConfig;
 import com.tmbu.tmbuclient.config.TmbuConfigManager;
 import com.tmbu.tmbuclient.gui.ToastManager;
-import com.tmbu.tmbuclient.module.impl.ChatNotifierModule;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -14,6 +12,7 @@ import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
 
 public class ModuleManager {
 	private final List<Module> modules = new ArrayList<>();
@@ -23,22 +22,60 @@ public class ModuleManager {
 	private boolean saveRequested;
 	private long lastSaveMs;
 	private boolean suppressToggleNotifications;
-	private ChatNotifierModule chatNotifier;
+
+	/**
+	 * External toggle listeners. Modules (like ChatNotifier) register themselves
+	 * here instead of being hardcoded via instanceof checks.
+	 */
+	private final List<BiConsumer<Module, Boolean>> toggleListeners = new ArrayList<>();
 
 	public void register(Module... modules) {
 		for (Module module : modules) {
 			this.modules.add(module);
 			module.manager = this;
 			this.lastKeyStates.put(module, false);
-			if (module instanceof ChatNotifierModule cn) this.chatNotifier = cn;
 		}
 		this.modules.sort(Comparator.comparing(Module::getName));
+	}
+
+	/**
+	 * Add a listener that fires whenever any module is toggled.
+	 * Used by modules like ChatNotifier to react without the manager knowing about them.
+	 */
+	public void addToggleListener(BiConsumer<Module, Boolean> listener) {
+		toggleListeners.add(listener);
+	}
+
+	public void removeToggleListener(BiConsumer<Module, Boolean> listener) {
+		toggleListeners.remove(listener);
 	}
 
 	public List<Module> getModules() { return modules; }
 
 	public List<Module> getByCategory(Category category) {
 		return modules.stream().filter(m -> m.getCategory() == category).toList();
+	}
+
+	/**
+	 * Find a module by its class type. Useful for inter-module communication
+	 * without hardcoding references in the manager.
+	 */
+	@SuppressWarnings("unchecked")
+	public <T extends Module> T getModule(Class<T> type) {
+		for (Module m : modules) {
+			if (type.isInstance(m)) return (T) m;
+		}
+		return null;
+	}
+
+	/**
+	 * Find a module by name.
+	 */
+	public Module getModuleByName(String name) {
+		for (Module m : modules) {
+			if (m.getName().equalsIgnoreCase(name)) return m;
+		}
+		return null;
 	}
 
 	public int getAccentColor() {
@@ -120,17 +157,15 @@ public class ModuleManager {
 	void onModuleToggled(Module module, boolean enabled) {
 		requestSave();
 
-		// Toast notification
 		if (!suppressToggleNotifications) {
+			// Toast notification
 			ToastManager.INSTANCE.push(module.getName(), enabled, getAccentColor());
-		}
 
-		// Chat notification (existing behavior)
-		if (suppressToggleNotifications || chatNotifier == null || !chatNotifier.isEnabled()) return;
-		Minecraft client = Minecraft.getInstance();
-		if (client.player == null) return;
-		String state = enabled ? "enabled" : "disabled";
-		client.player.displayClientMessage(Component.literal("[TMBU] " + module.getName() + " " + state), false);
+			// Notify external listeners (e.g. ChatNotifier)
+			for (BiConsumer<Module, Boolean> listener : toggleListeners) {
+				listener.accept(module, enabled);
+			}
+		}
 	}
 
 	private void handleKeybinds(Minecraft client) {

@@ -37,5 +37,9 @@ public class ModeSetting extends Setting<String> {
 		}
 		return 0;
 	}
-}
 
+	@Override
+	public void deserialize(Object raw) {
+		if (raw instanceof String s) setValue(s);
+	}
+}
