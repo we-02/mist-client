@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
-import com.tmbu.tmbuclient.event.events.PreMotionEvent;
+import com.tmbu.tmbuclient.event.events.PostKeybindsEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
@@ -20,8 +20,15 @@ import java.util.function.Consumer;
 /**
  * TriggerBot — auto-attacks when crosshair is on a valid entity.
  *
- * Runs on PreMotionEvent so all packets (INTERACT_ENTITY, ANIMATION)
- * are sent BEFORE the movement packet, avoiding Grim's Post check.
+ * Runs on PostKeybindsEvent — right after Minecraft.handleKeybinds() in
+ * Minecraft.tick(). This is the exact same timing as vanilla attacks:
+ * - After GameRenderer.pick() updates crosshairPickEntity
+ * - After handleKeybinds() processes vanilla key presses
+ * - BEFORE tickEntities() → LocalPlayer.tick() → sendPosition() → flying packet
+ *
+ * This means INTERACT_ENTITY + ANIMATION are sent before the flying packet,
+ * and the sprint slowdown from player.attack() is applied before movement
+ * calculation, matching vanilla behavior exactly.
  */
 public class TriggerBot extends Module {
 
@@ -38,7 +45,7 @@ public class TriggerBot extends Module {
     private final Random rng = new Random();
     private float nextCooldownThreshold;
 
-    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
+    private final Consumer<PostKeybindsEvent> handler = e -> onPostKeybinds(e.client());
 
     public TriggerBot() {
         super("TriggerBot", "Auto-attacks when crosshair is on a valid entity",
@@ -52,15 +59,15 @@ public class TriggerBot extends Module {
 
     @Override
     protected void registerEvents(EventBus bus) {
-        bus.subscribe(PreMotionEvent.class, 50, preMotionHandler);
+        bus.subscribe(PostKeybindsEvent.class, handler);
     }
 
     @Override
     protected void unregisterEvents(EventBus bus) {
-        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+        bus.unsubscribe(PostKeybindsEvent.class, handler);
     }
 
-    private void onPreMotion(Minecraft client) {
+    private void onPostKeybinds(Minecraft client) {
         LocalPlayer player = client.player;
         if (player == null || client.gameMode == null || client.level == null) return;
         if (client.screen != null) return;
@@ -80,6 +87,7 @@ public class TriggerBot extends Module {
         double dist = player.distanceTo(target);
         if (dist > range.getValue()) return;
 
+        // Attack at vanilla timing — same as startAttack() in handleKeybinds()
         client.gameMode.attack(player, target);
         player.swing(InteractionHand.MAIN_HAND);
         rollNextThreshold();

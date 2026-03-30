@@ -3,8 +3,7 @@ package com.tmbu.tmbuclient;
 import com.tmbu.tmbuclient.command.CommandManager;
 import com.tmbu.tmbuclient.gui.ClickGuiScreen;
 import com.tmbu.tmbuclient.gui.ToastManager;
-import com.tmbu.tmbuclient.hud.HudEditorScreen;
-import com.tmbu.tmbuclient.hud.HudManager;
+import com.tmbu.tmbuclient.hud.*;
 import com.tmbu.tmbuclient.hud.elements.*;
 import com.tmbu.tmbuclient.module.ModuleManager;
 import com.tmbu.tmbuclient.module.ModuleRegistry;
@@ -33,14 +32,29 @@ public final class TmbuClient {
 		// Initialize command system
 		CommandManager.INSTANCE.init();
 
-		// Register HUD elements
-		HudManager.INSTANCE.register(new WatermarkElement());
-		HudManager.INSTANCE.register(new FpsElement());
-		HudManager.INSTANCE.register(new PingElement());
-		HudManager.INSTANCE.register(new CoordsElement());
-		HudManager.INSTANCE.register(new ArmorElement());
-		HudManager.INSTANCE.register(new TotemCountElement());
-		HudManager.INSTANCE.load();
+		// Register HUD elements with Meteor-style anchor positioning
+		HudManager hud = HudManager.INSTANCE;
+
+		// Top left: watermark, fps, ping, coords
+		hud.add(new WatermarkElement(), 4, 4, XAnchor.Left, YAnchor.Top);
+		hud.add(new FpsElement(), 4, 16, XAnchor.Left, YAnchor.Top);
+		hud.add(new PingElement(), 4, 28, XAnchor.Left, YAnchor.Top);
+		hud.add(new CoordsElement(), 4, 40, XAnchor.Left, YAnchor.Top);
+
+		// Top right: active modules
+		hud.add(new ActiveModulesElement(), -4, 4, XAnchor.Right, YAnchor.Top);
+
+		// Bottom left: totems, armor
+		hud.add(new TotemCountElement(), 4, -40, XAnchor.Left, YAnchor.Bottom);
+		hud.add(new ArmorElement(), 4, -20, XAnchor.Left, YAnchor.Bottom);
+
+		// Bottom right: player model
+		hud.add(new PlayerModelElement(), -4, -4, XAnchor.Right, YAnchor.Bottom);
+
+		// Bottom right: potion timers (above player model)
+		hud.add(new PotionTimersElement(), -4, -84, XAnchor.Right, YAnchor.Bottom);
+
+		hud.load();
 
 		registerKeybinds();
 		ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
@@ -75,6 +89,7 @@ public final class TmbuClient {
 			client.setScreen(new HudEditorScreen());
 		}
 		moduleManager.tick(client);
+		HudManager.INSTANCE.tick();
 		ToastManager.INSTANCE.tick();
 	}
 }

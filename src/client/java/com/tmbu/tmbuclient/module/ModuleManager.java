@@ -5,7 +5,6 @@ import com.tmbu.tmbuclient.config.TmbuConfigManager;
 import com.tmbu.tmbuclient.gui.ToastManager;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
-import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -172,9 +171,9 @@ public class ModuleManager {
 		if (client.screen != null) return;
 		long handle = client.getWindow().handle();
 		for (Module module : modules) {
-			int key = module.getKeybind();
-			if (key < 0) continue;
-			boolean pressed    = GLFW.glfwGetKey(handle, key) == GLFW.GLFW_PRESS;
+			var kb = module.getKeybindSetting();
+			if (!kb.isBound()) continue;
+			boolean pressed    = kb.isPressed(handle);
 			boolean wasPressed = lastKeyStates.getOrDefault(module, false);
 			if (pressed && !wasPressed) module.toggle();
 			lastKeyStates.put(module, pressed);

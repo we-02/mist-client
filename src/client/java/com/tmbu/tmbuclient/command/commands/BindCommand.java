@@ -16,6 +16,7 @@ import java.util.Map;
 public class BindCommand extends Command {
 
     private static final Map<String, Integer> KEY_MAP = new HashMap<>();
+    private static final Map<String, Integer> MOUSE_MAP = new HashMap<>();
 
     static {
         // Populate common key names
@@ -26,6 +27,15 @@ public class BindCommand extends Command {
                 } catch (IllegalAccessException ignored) {}
             }
         }
+        // Mouse buttons
+        MOUSE_MAP.put("mouse1", GLFW.GLFW_MOUSE_BUTTON_LEFT);
+        MOUSE_MAP.put("mouse2", GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+        MOUSE_MAP.put("mouse3", GLFW.GLFW_MOUSE_BUTTON_MIDDLE);
+        MOUSE_MAP.put("mouse4", GLFW.GLFW_MOUSE_BUTTON_4);
+        MOUSE_MAP.put("mouse5", GLFW.GLFW_MOUSE_BUTTON_5);
+        MOUSE_MAP.put("mouseleft", GLFW.GLFW_MOUSE_BUTTON_LEFT);
+        MOUSE_MAP.put("mouseright", GLFW.GLFW_MOUSE_BUTTON_RIGHT);
+        MOUSE_MAP.put("mousemiddle", GLFW.GLFW_MOUSE_BUTTON_MIDDLE);
     }
 
     public BindCommand() {
@@ -55,15 +65,23 @@ public class BindCommand extends Command {
                     if (m == null) { error("Module '%s' not found.", moduleName); return 0; }
 
                     if (keyName.equals("none") || keyName.equals("unbind")) {
-                        m.getKeybindSetting().setValue(GLFW.GLFW_KEY_UNKNOWN);
+                        m.getKeybindSetting().clear();
                         info("Unbound %s.", m.getName());
                         return SUCCESS;
                     }
 
-                    Integer key = KEY_MAP.get(keyName);
-                    if (key == null) { error("Unknown key '%s'.", keyName); return 0; }
+                    // Check mouse buttons first
+                    Integer mouseBtn = MOUSE_MAP.get(keyName);
+                    if (mouseBtn != null) {
+                        m.getKeybindSetting().setMouseButton(mouseBtn);
+                        info("Bound %s to %s.", m.getName(), m.getKeybindSetting().getDisplayName());
+                        return SUCCESS;
+                    }
 
-                    m.getKeybindSetting().setValue(key);
+                    Integer key = KEY_MAP.get(keyName);
+                    if (key == null) { error("Unknown key '%s'. Use mouse1-5 for mouse buttons.", keyName); return 0; }
+
+                    m.getKeybindSetting().setKey(key);
                     info("Bound %s to %s.", m.getName(), keyName.toUpperCase());
                     return SUCCESS;
                 })));

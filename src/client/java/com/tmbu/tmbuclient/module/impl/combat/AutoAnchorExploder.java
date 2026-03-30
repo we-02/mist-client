@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
-import com.tmbu.tmbuclient.event.events.PreMotionEvent;
+import com.tmbu.tmbuclient.event.events.PostKeybindsEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
@@ -64,7 +64,7 @@ public class AutoAnchorExploder extends Module {
     private int ticksSinceLastInteraction = 0;
     private static final int MIN_INTERACTION_GAP = 2;
 
-    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
+    private final Consumer<PostKeybindsEvent> preMotionHandler = e -> onPreMotion(e.client());
 
     public AutoAnchorExploder() {
         super("AutoAnchor", "Automatically charges and detonates respawn anchors", Category.COMBAT, GLFW.GLFW_KEY_UNKNOWN);
@@ -75,12 +75,12 @@ public class AutoAnchorExploder extends Module {
 
     @Override
     protected void registerEvents(EventBus bus) {
-        bus.subscribe(PreMotionEvent.class, 20, preMotionHandler);
+        bus.subscribe(PostKeybindsEvent.class, 20, preMotionHandler);
     }
 
     @Override
     protected void unregisterEvents(EventBus bus) {
-        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+        bus.unsubscribe(PostKeybindsEvent.class, preMotionHandler);
     }
 
     private void resetState() {
@@ -155,6 +155,34 @@ public class AutoAnchorExploder extends Module {
         }
 
         // ── Normal flow: requires looking at an anchor ──
+        // If we have a stored anchor and crosshair is blocked (e.g. by glowstone),
+        // aim the player's view at a visible face of the anchor
+        if (currentAnchorPos != null && !isCharging) {
+            BlockState storedState = world.getBlockState(currentAnchorPos);
+            if (storedState.is(Blocks.RESPAWN_ANCHOR) && storedState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
+                boolean lookingAtAnchor = client.hitResult != null
+                    && client.hitResult.getType() == HitResult.Type.BLOCK
+                    && ((BlockHitResult) client.hitResult).getBlockPos().equals(currentAnchorPos);
+
+                if (!lookingAtAnchor) {
+                    // Crosshair is blocked — find a visible face and aim at it
+                    Vec3 target = findVisibleAnchorFace(player, world, currentAnchorPos);
+                    if (target != null) {
+                        aimAt(player, target);
+                        // Force pick() to update hitResult with the new rotation
+                        client.gameRenderer.pick(1.0f);
+                        // Now check if hitResult points at the anchor
+                        if (client.hitResult != null && client.hitResult.getType() == HitResult.Type.BLOCK
+                            && ((BlockHitResult) client.hitResult).getBlockPos().equals(currentAnchorPos)) {
+                            // Success — fall through to normal detonation flow
+                        } else {
+                            return; // Still blocked, try again next tick
+                        }
+                    }
+                }
+            }
+        }
+
         if (client.hitResult == null || client.hitResult.getType() != HitResult.Type.BLOCK) return;
         BlockHitResult hit = (BlockHitResult) client.hitResult;
         BlockPos pos = hit.getBlockPos();
@@ -328,6 +356,76 @@ public class AutoAnchorExploder extends Module {
         return new BlockHitResult(
             new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5),
             Direction.UP, pos, false);
+    }
+
+    /**
+     * Find a visible point on the anchor block by raycasting from the player's eyes.
+     * Tries multiple points on each face, prioritizing the top face with offsets
+     * to avoid rays being blocked by adjacent glowstone.
+     */
+    private static Vec3 findVisibleAnchorFace(LocalPlayer player, Level world, BlockPos anchorPos) {
+        Vec3 eyes = player.getEyePosition();
+        double ax = anchorPos.getX(), ay = anchorPos.getY(), az = anchorPos.getZ();
+
+        // Try multiple sample points on each face, starting with top face
+        // Top face points — spread across the face to find one not blocked by glowstone
+        Vec3[] topPoints = {
+            new Vec3(ax + 0.5, ay + 1.0, az + 0.5),   // center
+            new Vec3(ax + 0.25, ay + 1.0, az + 0.25),  // corners
+            new Vec3(ax + 0.75, ay + 1.0, az + 0.25),
+            new Vec3(ax + 0.25, ay + 1.0, az + 0.75),
+            new Vec3(ax + 0.75, ay + 1.0, az + 0.75),
+            new Vec3(ax + 0.1, ay + 1.0, az + 0.5),    // edges
+            new Vec3(ax + 0.9, ay + 1.0, az + 0.5),
+            new Vec3(ax + 0.5, ay + 1.0, az + 0.1),
+            new Vec3(ax + 0.5, ay + 1.0, az + 0.9),
+        };
+
+        for (Vec3 pt : topPoints) {
+            if (canSeeAnchorAt(world, eyes, pt, anchorPos, player)) return pt;
+        }
+
+        // Side faces — try center and edges of each
+        Direction[] sides = { Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST };
+        for (Direction face : sides) {
+            double fx = ax + 0.5 + face.getStepX() * 0.5;
+            double fz = az + 0.5 + face.getStepZ() * 0.5;
+            Vec3[] sidePoints = {
+                new Vec3(fx, ay + 0.8, fz),  // upper part of side
+                new Vec3(fx, ay + 0.5, fz),  // center
+                new Vec3(fx, ay + 0.2, fz),  // lower part
+            };
+            for (Vec3 pt : sidePoints) {
+                if (canSeeAnchorAt(world, eyes, pt, anchorPos, player)) return pt;
+            }
+        }
+
+        return null;
+    }
+
+    private static boolean canSeeAnchorAt(Level world, Vec3 eyes, Vec3 target, BlockPos anchorPos, LocalPlayer player) {
+        net.minecraft.world.level.ClipContext ctx = new net.minecraft.world.level.ClipContext(
+            eyes, target,
+            net.minecraft.world.level.ClipContext.Block.OUTLINE,
+            net.minecraft.world.level.ClipContext.Fluid.NONE,
+            net.minecraft.world.phys.shapes.CollisionContext.of(player));
+        BlockHitResult hit = world.clip(ctx);
+        return hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(anchorPos);
+    }
+
+    /**
+     * Aim the player's actual view (client-side camera rotation) at a target position.
+     */
+    private static void aimAt(LocalPlayer player, Vec3 target) {
+        Vec3 eyes = player.getEyePosition();
+        double dx = target.x - eyes.x;
+        double dy = target.y - eyes.y;
+        double dz = target.z - eyes.z;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(-Math.atan2(dy, dist));
+        player.setYRot(yaw);
+        player.setXRot(pitch);
     }
 
     /**

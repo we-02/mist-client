@@ -1,54 +1,81 @@
 package com.tmbu.tmbuclient.hud.elements;
 
 import com.tmbu.tmbuclient.hud.HudElement;
+import com.tmbu.tmbuclient.hud.HudRenderer;
+import com.tmbu.tmbuclient.hud.HudSetting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
+/**
+ * Displays armor items with durability bars.
+ */
 public class ArmorElement extends HudElement {
-    private static final EquipmentSlot[] ARMOR_SLOTS = {
-        EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
-    };
+    public enum Orientation { Horizontal, Vertical }
+
+    private Orientation orientation = Orientation.Horizontal;
+    private boolean flipOrder = true;
 
     public ArmorElement() {
-        super("armor", "Armor", 4, 60, true);
+        super("armor", "Armor");
+
+        addSetting(HudSetting.ofEnum("Orientation", Orientation.class,
+            () -> orientation, v -> orientation = v));
+        addSetting(HudSetting.ofBool("Flip Order",
+            () -> flipOrder, v -> flipOrder = v));
     }
 
+    public Orientation getOrientation() { return orientation; }
+    public void setOrientation(Orientation o) { this.orientation = o; }
+    public boolean isFlipOrder() { return flipOrder; }
+    public void setFlipOrder(boolean f) { this.flipOrder = f; }
+
     @Override
-    public void render(GuiGraphics g, Minecraft client, float delta) {
-        if (client.player == null) { setSize(70, 48); return; }
+    public void render(HudRenderer r) {
+        float scale = (float) getScale();
+        int itemSize = (int) (16 * scale);
+        int gap = (int) (2 * scale);
 
-        int x = getX(), y = getY();
-        int maxW = 70;
-
-        for (int i = 0; i < ARMOR_SLOTS.length; i++) {
-            ItemStack stack = client.player.getItemBySlot(ARMOR_SLOTS[i]);
-            int rowY = y + i * 12;
-
-            if (stack.isEmpty()) {
-                drawBg(g, x, rowY, maxW, 11);
-                g.drawString(client.font, "Empty", x + 3, rowY + 1, 0x40888888, false);
-            } else {
-                drawBg(g, x, rowY, maxW, 11);
-                String name = stack.getHoverName().getString();
-                if (name.length() > 8) name = name.substring(0, 7) + "..";
-
-                if (stack.isDamageableItem()) {
-                    int maxDmg = stack.getMaxDamage();
-                    int dmg = stack.getDamageValue();
-                    float pct = 1.0f - (float) dmg / maxDmg;
-                    int barW = (int)((maxW - 4) * pct);
-                    int barColor = pct > 0.5f ? 0xFF55FF55 : pct > 0.25f ? 0xFFFFFF55 : 0xFFFF5555;
-
-                    g.fill(x + 2, rowY + 9, x + maxW - 2, rowY + 11, 0xFF222222);
-                    g.fill(x + 2, rowY + 9, x + 2 + barW, rowY + 11, barColor);
-                }
-
-                g.drawString(client.font, name, x + 3, rowY + 1, getTextColor(), false);
-            }
+        if (orientation == Orientation.Horizontal) {
+            setSize((itemSize + gap) * 4, itemSize);
+        } else {
+            setSize(itemSize, (itemSize + gap) * 4);
         }
 
-        setSize(maxW, ARMOR_SLOTS.length * 12);
+        drawBg(r.graphics, x, y, getWidth(), getHeight());
+
+        r.post(() -> {
+            Minecraft mc = Minecraft.getInstance();
+            EquipmentSlot[] order = flipOrder
+                ? new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}
+                : new EquipmentSlot[]{EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD};
+
+            for (int i = 0; i < order.length; i++) {
+                ItemStack stack = getItem(mc, order[i]);
+                int ix, iy;
+                if (orientation == Orientation.Horizontal) {
+                    ix = x + i * (itemSize + gap);
+                    iy = y;
+                } else {
+                    ix = x;
+                    iy = y + i * (itemSize + gap);
+                }
+                r.item(stack, ix, iy, scale, stack.isDamageableItem());
+            }
+        });
+    }
+
+    private ItemStack getItem(Minecraft mc, EquipmentSlot slot) {
+        if (mc.player == null || isInEditor()) {
+            return switch (slot) {
+                case HEAD -> Items.NETHERITE_HELMET.getDefaultInstance();
+                case CHEST -> Items.NETHERITE_CHESTPLATE.getDefaultInstance();
+                case LEGS -> Items.NETHERITE_LEGGINGS.getDefaultInstance();
+                case FEET -> Items.NETHERITE_BOOTS.getDefaultInstance();
+                default -> ItemStack.EMPTY;
+            };
+        }
+        return mc.player.getItemBySlot(slot);
     }
 }

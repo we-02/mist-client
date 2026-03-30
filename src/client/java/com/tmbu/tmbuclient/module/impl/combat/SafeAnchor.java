@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
-import com.tmbu.tmbuclient.event.events.PreMotionEvent;
+import com.tmbu.tmbuclient.event.events.PostKeybindsEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
@@ -59,7 +59,7 @@ public class SafeAnchor extends Module {
     /** True while we're in the middle of a slot-switch → deferred-place sequence. */
     private boolean busy = false;
 
-    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
+    private final Consumer<PostKeybindsEvent> preMotionHandler = e -> onPreMotion(e.client());
 
     public SafeAnchor() {
         super("SafeAnchor", "Places glowstone between you and anchors to reduce explosion damage",
@@ -68,12 +68,12 @@ public class SafeAnchor extends Module {
 
     @Override
     protected void registerEvents(EventBus bus) {
-        bus.subscribe(PreMotionEvent.class, 10, preMotionHandler);
+        bus.subscribe(PostKeybindsEvent.class, 10, preMotionHandler);
     }
 
     @Override
     protected void unregisterEvents(EventBus bus) {
-        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+        bus.unsubscribe(PostKeybindsEvent.class, preMotionHandler);
     }
 
     @Override

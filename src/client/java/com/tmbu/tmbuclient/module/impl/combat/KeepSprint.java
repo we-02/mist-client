@@ -30,7 +30,7 @@ import java.util.function.Consumer;
 public class KeepSprint extends Module {
 
     private final SliderSetting motionPercent = addSetting(
-        new SliderSetting("Motion", 80, 0, 100, 1).group("General"));
+        new SliderSetting("Motion", 0, 0, 100, 1).group("General"));
 
     private boolean wasSprinting = false;
     private Vec3 savedVelocity = Vec3.ZERO;

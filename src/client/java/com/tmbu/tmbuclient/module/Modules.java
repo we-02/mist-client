@@ -16,6 +16,7 @@ public final class Modules {
 		ModuleRegistry.add(AutoAnchorExploder::new);
 		ModuleRegistry.add(AutoCrystal::new);
 		ModuleRegistry.add(AlwaysSprintModule::new);
+		ModuleRegistry.add(FastPlace::new);
 		ModuleRegistry.add(EspModule::new);
 		ModuleRegistry.add(NametagsModule::new);
 		ModuleRegistry.add(ChatNotifierModule::new);
@@ -36,5 +37,6 @@ public final class Modules {
 		ModuleRegistry.add(HandView::new);
 		ModuleRegistry.add(Ambience::new);
 		ModuleRegistry.add(BlastTrajectory::new);
+		ModuleRegistry.add(Trail::new);
 	}
 }

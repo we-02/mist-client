@@ -4,7 +4,7 @@ import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.tmbu.tmbuclient.event.EventBus;
-import com.tmbu.tmbuclient.event.events.PreMotionEvent;
+import com.tmbu.tmbuclient.event.events.PostKeybindsEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
@@ -144,7 +144,7 @@ public class AutoCrystal extends Module {
      */
     public static volatile AutoCrystal activeInstance = null;
 
-    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
+    private final Consumer<PostKeybindsEvent> preMotionHandler = e -> onPreMotion(e.client());
 
     public AutoCrystal() {
         super("AutoCrystal", "Crystal PvP assist — auto place & break with damage calculation",
@@ -155,12 +155,12 @@ public class AutoCrystal extends Module {
 
     @Override
     protected void registerEvents(EventBus bus) {
-        bus.subscribe(PreMotionEvent.class, preMotionHandler);
+        bus.subscribe(PostKeybindsEvent.class, preMotionHandler);
     }
 
     @Override
     protected void unregisterEvents(EventBus bus) {
-        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+        bus.unsubscribe(PostKeybindsEvent.class, preMotionHandler);
     }
 
     @Override

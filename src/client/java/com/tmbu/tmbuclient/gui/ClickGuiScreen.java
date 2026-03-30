@@ -624,7 +624,7 @@ public class ClickGuiScreen extends Screen {
 				nameY += 10;
 			}
 
-			String label = bindingSetting == ks ? "[ Press key ]" : ks.getDisplayName();
+			String label = bindingSetting == ks ? "[ Press key/mouse ]" : ks.getDisplayName();
 			boolean binding = bindingSetting == ks;
 			int lc = binding ? withAlpha(accent, a) : withAlpha(COL_TEXT_DIM, a);
 			int labelWidth = font.width(label);
@@ -713,6 +713,14 @@ public class ClickGuiScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		// If we're binding a key, capture mouse buttons too
+		if (bindingSetting != null) {
+			bindingSetting.setMouseButton(event.button());
+			bindingSetting = null;
+			moduleManager.requestSave();
+			return true;
+		}
+
 		int cx = panelX + panelW / 2;
 		int cy = panelY + panelH / 2;
 		int mx = toPanelSpaceX(event.x(), cx, lastScale);
@@ -1003,7 +1011,11 @@ public class ClickGuiScreen extends Screen {
 	public boolean keyPressed(KeyEvent event) {
 		if (bindingSetting != null) {
 			int key = event.key();
-			bindingSetting.setValue(key == GLFW.GLFW_KEY_ESCAPE ? -1 : key);
+			if (key == GLFW.GLFW_KEY_ESCAPE) {
+				bindingSetting.clear();
+			} else {
+				bindingSetting.setKey(key);
+			}
 			bindingSetting = null;
 			moduleManager.requestSave();
 			return true;

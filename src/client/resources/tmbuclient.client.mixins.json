@@ -12,7 +12,9 @@
 		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
 		"ItemInHandRendererMixin",
+		"LivingEntityMixin",
 		"LocalPlayerAttackMixin",
+		"MinecraftMixin",
 		"MixinLocalPlayer",
 		"SkyRendererMixin"
 	],

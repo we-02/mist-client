@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
-import com.tmbu.tmbuclient.event.events.PreMotionEvent;
+import com.tmbu.tmbuclient.event.events.PostKeybindsEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
@@ -42,7 +42,7 @@ public class SuperKnockback extends Module {
     /** When true, we sent STOP_SPRINTING last tick and need to send START_SPRINTING this tick. */
     private boolean pendingResprint = false;
 
-    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
+    private final Consumer<PostKeybindsEvent> preMotionHandler = e -> onPreMotion(e.client());
 
     public SuperKnockback() {
         super("SuperKnockback", "Increases knockback dealt via sprint-reset",
@@ -51,13 +51,12 @@ public class SuperKnockback extends Module {
 
     @Override
     protected void registerEvents(EventBus bus) {
-        // Run before other combat modules so the sprint state is correct
-        bus.subscribe(PreMotionEvent.class, 5, preMotionHandler);
+        bus.subscribe(PostKeybindsEvent.class, 5, preMotionHandler);
     }
 
     @Override
     protected void unregisterEvents(EventBus bus) {
-        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+        bus.unsubscribe(PostKeybindsEvent.class, preMotionHandler);
     }
 
     @Override
