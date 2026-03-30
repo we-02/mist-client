@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.render;
 
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -9,7 +9,6 @@ import com.tmbu.tmbuclient.render.WireframeEntityRenderer;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
 import com.tmbu.tmbuclient.settings.ColorSetting;
 import com.tmbu.tmbuclient.settings.EnumSetting;
-import com.tmbu.tmbuclient.settings.ModeSetting;
 import com.tmbu.tmbuclient.settings.SliderSetting;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.minecraft.client.Minecraft;
@@ -80,13 +79,6 @@ public class EspModule extends Module {
     private final SliderSetting glowLayers   = addSetting(new SliderSetting("Glow Layers", 0.0, 0.0, 6.0, 1.0).group("Glow"));
     private final SliderSetting glowSpacing  = addSetting(new SliderSetting("Glow Spacing", 0.5, 0.1, 2.0, 0.1).group("Glow").visibleWhen(() -> glowLayers.getValue() > 0));
 
-    // ── Tracers ──────────────────────────────────────────────────────────────
-    private final BooleanSetting tracers       = addSetting(new BooleanSetting("Tracers", false).group("Tracers"));
-    private final ModeSetting    tracerOrigin  = addSetting(new ModeSetting("Tracer Origin", "Center",
-                                                     new String[]{"Center", "Feet", "Eyes"}).group("Tracers").visibleWhen(tracers::getValue));
-    private final SliderSetting  tracerAlpha   = addSetting(new SliderSetting("Tracer Alpha", 180.0, 10.0, 255.0, 1.0).group("Tracers").visibleWhen(tracers::getValue));
-    private final BooleanSetting tracerFade    = addSetting(new BooleanSetting("Tracer Fade", true).group("Tracers").visibleWhen(tracers::getValue));
-
     // ── General ──────────────────────────────────────────────────────────────
     private final BooleanSetting throughWalls = addSetting(new BooleanSetting("Through Walls", true).group("General"));
     private final SliderSetting  range       = addSetting(new SliderSetting("Range", 64.0, 8.0, 256.0, 1.0).group("General"));
@@ -144,23 +136,6 @@ public class EspModule extends Module {
                 // instead of using the raw collision hitbox which is wider and jitters
                 AABB box = getInterpolatedVisualBox(entity, partialTick, cam, tightBox.getValue())
                     .inflate(boxInflate.getValue());
-
-                // ── Tracers ──────────────────────────────────────────────────
-                if (tracers.getValue()) {
-                    Vec3 target = box.getCenter();
-                    int tAlpha = tracerAlpha.getValue().intValue();
-                    if (tracerFade.getValue()) {
-                        float fadePct = (float) Math.max(0, Math.min(1,
-                            (dist - distFadeStart.getValue()) / (distFadeEnd.getValue() - distFadeStart.getValue())));
-                        tAlpha = (int) (tAlpha * (1.0f - fadePct * 0.7f));
-                    }
-                    int tColor = (color & 0x00FFFFFF) | (Math.max(1, tAlpha) << 24);
-                    Vec3 origin = getTracerOrigin(box, cam);
-                    emitLine(lines, pose,
-                        (float) origin.x, (float) origin.y, (float) origin.z,
-                        (float) target.x, (float) target.y, (float) target.z,
-                        tColor, w);
-                }
 
                 // ── Wireframe (model-accurate, independent of outline style) ─
                 if (wireframe.getValue()) {
@@ -378,17 +353,6 @@ public class EspModule extends Module {
         if (hue < 0) hue += 1.0f;
         int rgb = java.awt.Color.HSBtoRGB(hue, 0.9f, 1.0f);
         return (rgb & 0x00FFFFFF) | (alpha << 24);
-    }
-
-    // ── Tracer origin ────────────────────────────────────────────────────────
-
-    private Vec3 getTracerOrigin(AABB box, Vec3 cam) {
-        // All coordinates are already camera-relative (box is moved by -cam)
-        return switch (tracerOrigin.getMode()) {
-            case "Feet"   -> new Vec3(0, 0, 0);
-            case "Eyes"   -> new Vec3(0, 0, 0); // camera is at eye level
-            default        -> new Vec3(0, 0, 0.1); // slight offset so line isn't invisible
-        };
     }
 
     // ── Render: Box ──────────────────────────────────────────────────────────

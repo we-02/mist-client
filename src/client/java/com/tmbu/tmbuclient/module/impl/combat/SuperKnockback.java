@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
 import com.tmbu.tmbuclient.event.events.PreMotionEvent;
@@ -8,7 +8,6 @@ import com.tmbu.tmbuclient.settings.BooleanSetting;
 import com.tmbu.tmbuclient.settings.SliderSetting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.EntityHitResult;
@@ -78,15 +77,8 @@ public class SuperKnockback extends Module {
         // Phase 2: Re-sprint after the stop from last tick
         if (pendingResprint) {
             pendingResprint = false;
-            var move = player.input.getMoveVector();
-            if (move.x != 0 || move.y != 0) {
-                client.getConnection().send(new ServerboundPlayerCommandPacket(
-                    player, ServerboundPlayerCommandPacket.Action.START_SPRINTING));
-                player.setSprinting(true);
-            }
-            // The attack will happen naturally this tick via TriggerBot/manual click
-            // since the sprint-start is in a different tick than the attack,
-            // PacketOrderF won't flag.
+            // Actually start sprinting again (client + server)
+            player.setSprinting(true);
             return;
         }
 
@@ -100,22 +92,16 @@ public class SuperKnockback extends Module {
         Entity target = getLookedTarget(client, player);
         if (target == null) return;
 
-        // Only on living entities with low enough hurt time
         if (!(target instanceof LivingEntity living)) return;
         if (living.hurtTime > hurtTime.getValue().intValue()) return;
 
-        // Check if attack cooldown is ready (we're about to attack next tick)
         float cooldown = player.getAttackStrengthScale(0.5f);
         if (cooldown < 0.9f) return;
 
-        // Chance check
         if (Math.random() * 100 > chance.getValue()) return;
 
-        // Send STOP_SPRINTING this tick. START_SPRINTING will be sent next tick.
-        // This is the only entity action packet this tick, so no PacketOrderF flag.
-        client.getConnection().send(new ServerboundPlayerCommandPacket(
-            player, ServerboundPlayerCommandPacket.Action.STOP_SPRINTING));
-
+        // Actually stop sprinting (client-side too, so Simulation matches)
+        player.setSprinting(false);
         pendingResprint = true;
     }
 

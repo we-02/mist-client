@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.render;
 
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;

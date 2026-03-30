@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.render;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.tmbu.tmbuclient.event.EventBus;

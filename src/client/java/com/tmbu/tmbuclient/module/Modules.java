@@ -1,6 +1,9 @@
 package com.tmbu.tmbuclient.module;
 
-import com.tmbu.tmbuclient.module.impl.*;
+import com.tmbu.tmbuclient.module.impl.combat.*;
+import com.tmbu.tmbuclient.module.impl.render.*;
+import com.tmbu.tmbuclient.module.impl.player.*;
+import com.tmbu.tmbuclient.module.impl.misc.*;
 
 /**
  * Single place to register all modules. Adding a new module is one line here —
@@ -28,7 +31,10 @@ public final class Modules {
 		ModuleRegistry.add(KeepSprint::new);
 		ModuleRegistry.add(SuperKnockback::new);
 		ModuleRegistry.add(TriggerBot::new);
+		ModuleRegistry.add(SelfWeb::new);
+		ModuleRegistry.add(AutoWeb::new);
 		ModuleRegistry.add(HandView::new);
 		ModuleRegistry.add(Ambience::new);
+		ModuleRegistry.add(BlastTrajectory::new);
 	}
 }

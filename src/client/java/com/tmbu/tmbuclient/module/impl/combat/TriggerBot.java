@@ -1,54 +1,44 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
+import com.tmbu.tmbuclient.event.EventBus;
+import com.tmbu.tmbuclient.event.events.PreMotionEvent;
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;
 import com.tmbu.tmbuclient.settings.BooleanSetting;
 import com.tmbu.tmbuclient.settings.SliderSetting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.phys.EntityHitResult;
-import net.minecraft.world.phys.HitResult;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.Random;
+import java.util.function.Consumer;
 
 /**
- * TriggerBot — automatically attacks when your crosshair is on a valid entity
- * and the 1.9+ attack cooldown is ready.
+ * TriggerBot — auto-attacks when crosshair is on a valid entity.
  *
- * Timing is based on the raw attack strength ticker vs the weapon's cooldown
- * period (like LiquidBounce's KillAura). No CPS — attacks exactly when the
- * cooldown bar fills to the configured threshold, with optional randomization
- * to avoid detection.
- *
- * Does NOT manually reset the attack strength ticker — gameMode.attack()
- * already calls player.attack() which resets it internally.
+ * Runs on PreMotionEvent so all packets (INTERACT_ENTITY, ANIMATION)
+ * are sent BEFORE the movement packet, avoiding Grim's Post check.
  */
 public class TriggerBot extends Module {
 
-    // ── General ──────────────────────────────────────────────────────────────
-    private final SliderSetting  cooldownMin       = addSetting(new SliderSetting("Cooldown Min", 0.9, 0.5, 1.0, 0.05)
-        .group("Timing"));
-    private final SliderSetting  cooldownMax       = addSetting(new SliderSetting("Cooldown Max", 1.0, 0.5, 1.5, 0.05)
-        .group("Timing"));
-    private final SliderSetting  range             = addSetting(new SliderSetting("Range", 3.0, 1.0, 6.0, 0.1)
-        .group("General"));
-
-    // ── Targeting ────────────────────────────────────────────────────────────
+    private final SliderSetting  cooldownMin       = addSetting(new SliderSetting("Cooldown Min", 0.9, 0.5, 1.0, 0.05).group("Timing"));
+    private final SliderSetting  cooldownMax       = addSetting(new SliderSetting("Cooldown Max", 1.0, 0.5, 1.5, 0.05).group("Timing"));
+    private final SliderSetting  range             = addSetting(new SliderSetting("Range", 3.0, 1.0, 6.0, 0.1).group("General"));
     private final BooleanSetting targetPlayers     = addSetting(new BooleanSetting("Players", true).group("Targeting"));
     private final BooleanSetting targetHostiles    = addSetting(new BooleanSetting("Hostiles", false).group("Targeting"));
     private final BooleanSetting targetInvisible   = addSetting(new BooleanSetting("Invisible", false).group("Targeting"));
-
-    // ── Conditions ───────────────────────────────────────────────────────────
     private final BooleanSetting requireWeapon     = addSetting(new BooleanSetting("Require Weapon", false).group("Conditions"));
     private final BooleanSetting stopOnShield      = addSetting(new BooleanSetting("Stop On Shield", false).group("Conditions"));
     private final BooleanSetting stopOnUse         = addSetting(new BooleanSetting("Stop While Using", true).group("Conditions"));
 
     private final Random rng = new Random();
     private float nextCooldownThreshold;
+
+    private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
 
     public TriggerBot() {
         super("TriggerBot", "Auto-attacks when crosshair is on a valid entity",
@@ -61,67 +51,54 @@ public class TriggerBot extends Module {
     }
 
     @Override
-    public void onTick(Minecraft client) {
+    protected void registerEvents(EventBus bus) {
+        bus.subscribe(PreMotionEvent.class, 50, preMotionHandler);
+    }
+
+    @Override
+    protected void unregisterEvents(EventBus bus) {
+        bus.unsubscribe(PreMotionEvent.class, preMotionHandler);
+    }
+
+    private void onPreMotion(Minecraft client) {
         LocalPlayer player = client.player;
         if (player == null || client.gameMode == null || client.level == null) return;
         if (client.screen != null) return;
 
-        // Conditions
         if (stopOnShield.getValue() && (player.getMainHandItem().getItem() instanceof net.minecraft.world.item.ShieldItem
             || player.getOffhandItem().getItem() instanceof net.minecraft.world.item.ShieldItem)) return;
         if (stopOnUse.getValue() && player.isUsingItem()) return;
         if (requireWeapon.getValue() && !isWeapon(player)) return;
 
-        // Check cooldown using raw tick-based calculation (same approach as LiquidBounce)
-        // getAttackStrengthScale(0.5f) gives the progress at mid-tick which is more
-        // representative than 0 (start of tick). The value ranges 0→1 where 1 = full.
-        float cooldown = player.getAttackStrengthScale(0.5f);
+        float cooldown = player.getAttackStrengthScale(0);
         if (cooldown < nextCooldownThreshold) return;
 
-        // Check if crosshair is on a valid entity
-        if (client.hitResult == null || client.hitResult.getType() != HitResult.Type.ENTITY) return;
-        if (!(client.hitResult instanceof EntityHitResult eHit)) return;
-
-        Entity target = eHit.getEntity();
+        if (client.crosshairPickEntity == null) return;
+        Entity target = client.crosshairPickEntity;
         if (!isValidTarget(player, target)) return;
 
-        // Range check
-        if (player.distanceToSqr(target) > range.getValue() * range.getValue()) return;
+        double dist = player.distanceTo(target);
+        if (dist > range.getValue()) return;
 
-        // Attack — gameMode.attack() internally calls player.attack() which
-        // resets the attack strength ticker. Do NOT call resetAttackStrengthTicker()
-        // manually — that double-resets and breaks the timing.
         client.gameMode.attack(player, target);
-        player.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
-
-        // Roll a new randomized threshold for the next attack
+        player.swing(InteractionHand.MAIN_HAND);
         rollNextThreshold();
     }
 
-    /**
-     * Randomize the cooldown threshold between min and max for each attack.
-     * This mimics human variance and avoids anti-cheat pattern detection.
-     */
     private void rollNextThreshold() {
         float min = cooldownMin.getValue().floatValue();
         float max = cooldownMax.getValue().floatValue();
-        if (max <= min) {
-            nextCooldownThreshold = min;
-        } else {
-            nextCooldownThreshold = min + rng.nextFloat() * (max - min);
-        }
+        nextCooldownThreshold = max <= min ? min : min + rng.nextFloat() * (max - min);
     }
 
     private boolean isValidTarget(LocalPlayer player, Entity entity) {
         if (entity == player || !entity.isAlive()) return false;
         if (!targetInvisible.getValue() && entity.isInvisible()) return false;
-
         if (entity instanceof Player p) {
             if (p.isSpectator()) return false;
             return targetPlayers.getValue();
         }
         if (entity instanceof Enemy) return targetHostiles.getValue();
-
         return false;
     }
 

@@ -1,5 +1,6 @@
 package com.tmbu.tmbuclient;
 
+import com.tmbu.tmbuclient.command.CommandManager;
 import com.tmbu.tmbuclient.gui.ClickGuiScreen;
 import com.tmbu.tmbuclient.gui.ToastManager;
 import com.tmbu.tmbuclient.hud.HudEditorScreen;
@@ -28,6 +29,9 @@ public final class TmbuClient {
 		Modules.register();
 		ModuleRegistry.registerAll(moduleManager);
 		moduleManager.loadConfig();
+
+		// Initialize command system
+		CommandManager.INSTANCE.init();
 
 		// Register HUD elements
 		HudManager.INSTANCE.register(new WatermarkElement());

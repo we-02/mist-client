@@ -1,6 +1,6 @@
 package com.tmbu.tmbuclient.mixin.client;
 
-import com.tmbu.tmbuclient.module.impl.Ambience;
+import com.tmbu.tmbuclient.module.impl.render.Ambience;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.SkyRenderer;

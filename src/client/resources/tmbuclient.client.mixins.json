@@ -6,11 +6,12 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"AvatarRendererMixin",
+		"ChatMixin",
+		"ChatScreenMixin",
 		"ClientLevelMixin",
 		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
 		"ItemInHandRendererMixin",
-		"LivingEntitySwingMixin",
 		"LocalPlayerAttackMixin",
 		"MixinLocalPlayer",
 		"SkyRendererMixin"

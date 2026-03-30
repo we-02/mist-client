@@ -1,4 +1,6 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.player;
+
+import com.tmbu.tmbuclient.module.impl.combat.AutoCrystal;
 
 import com.tmbu.tmbuclient.module.Category;
 import com.tmbu.tmbuclient.module.Module;

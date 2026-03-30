@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
 import com.tmbu.tmbuclient.event.events.PreMotionEvent;
@@ -8,6 +8,7 @@ import com.tmbu.tmbuclient.settings.BooleanSetting;
 import com.tmbu.tmbuclient.settings.SliderSetting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
@@ -39,6 +40,7 @@ public class AutoAnchorExploder extends Module {
 
     private final BooleanSetting autoCharge  = addSetting(new BooleanSetting("Auto Charge", true).group("General"));
     private final BooleanSetting autoDetonate = addSetting(new BooleanSetting("Auto Detonate", true).group("General"));
+    private final BooleanSetting packetDetonate = addSetting(new BooleanSetting("Packet Detonate", false).group("General"));
     private final BooleanSetting requireHold = addSetting(new BooleanSetting("Require Hold", false).group("General"));
     private final SliderSetting  chargeDelay = addSetting(new SliderSetting("Charge Delay", 100, 0, 500, 10).group("Timing"));
     private final BooleanSetting switchItems = addSetting(new BooleanSetting("Auto Switch Items", true).group("Switching"));
@@ -119,6 +121,40 @@ public class AutoAnchorExploder extends Module {
         }
         wasHolding = true;
 
+        // ── Packet detonate: try to detonate stored anchor without looking at it ──
+        if (packetDetonate.getValue() && autoDetonate.getValue() && currentAnchorPos != null && !isCharging) {
+            BlockState storedState = world.getBlockState(currentAnchorPos);
+            if (storedState.is(Blocks.RESPAWN_ANCHOR)) {
+                int charges = storedState.getValue(RespawnAnchorBlock.CHARGE);
+                int min = (int) Math.round(minCharges.getValue());
+                int max = (int) Math.round(maxCharges.getValue());
+                if (charges >= min && charges <= max && ticksSinceLastInteraction >= MIN_INTERACTION_GAP) {
+                    BlockPos detonatePos = currentAnchorPos;
+                    isCharging = false;
+                    currentAnchorPos = null;
+
+                    SafeAnchor sa = getSafeAnchor();
+                    if (sa != null && sa.isEnabled()) {
+                        boolean shieldQueued = sa.placeShield(detonatePos);
+                        if (shieldQueued) {
+                            queueDetonation(player, gm, detonatePos);
+                            return;
+                        }
+                    }
+
+                    ensureNotHoldingGlowstone(player);
+                    if (!player.getMainHandItem().is(Items.GLOWSTONE)) {
+                        packetDetonateAnchor(player, gm, detonatePos);
+                    }
+                    return;
+                }
+            } else {
+                // Anchor was broken/removed
+                currentAnchorPos = null;
+            }
+        }
+
+        // ── Normal flow: requires looking at an anchor ──
         if (client.hitResult == null || client.hitResult.getType() != HitResult.Type.BLOCK) return;
         BlockHitResult hit = (BlockHitResult) client.hitResult;
         BlockPos pos = hit.getBlockPos();
@@ -175,13 +211,21 @@ public class AutoAnchorExploder extends Module {
                 // Switched slot this tick — queue detonate for next tick
                 actionQueue.add(() -> {
                     if (!player.getMainHandItem().is(Items.GLOWSTONE)) {
-                        gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
-                        ticksSinceLastInteraction = 0;
+                        if (packetDetonate.getValue()) {
+                            packetDetonateAnchor(player, gm, pos);
+                        } else {
+                            gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                            ticksSinceLastInteraction = 0;
+                        }
                     }
                 });
             } else {
-                gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
-                ticksSinceLastInteraction = 0;
+                if (packetDetonate.getValue()) {
+                    packetDetonateAnchor(player, gm, pos);
+                } else {
+                    gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                    ticksSinceLastInteraction = 0;
+                }
             }
             return;
         }
@@ -268,8 +312,12 @@ public class AutoAnchorExploder extends Module {
                 BlockState freshState = player.level().getBlockState(pos);
                 if (freshState.is(Blocks.RESPAWN_ANCHOR)
                     && freshState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
-                    gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
-                    ticksSinceLastInteraction = 0;
+                    if (packetDetonate.getValue()) {
+                        packetDetonateAnchor(player, gm, pos);
+                    } else {
+                        gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                        ticksSinceLastInteraction = 0;
+                    }
                 }
             }
         });
@@ -280,6 +328,40 @@ public class AutoAnchorExploder extends Module {
         return new BlockHitResult(
             new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5),
             Direction.UP, pos, false);
+    }
+
+    /**
+     * Detonate an anchor using packet rotation — sends a server-side rotation
+     * toward the anchor, interacts, then restores the original rotation.
+     * This allows detonation without physically looking at the anchor.
+     * The camera never moves visually since it all happens in one tick.
+     */
+    private void packetDetonateAnchor(LocalPlayer player, MultiPlayerGameMode gm, BlockPos pos) {
+        if (player.getMainHandItem().is(Items.GLOWSTONE)) return;
+
+        Vec3 anchorCenter = new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+        Vec3 eyes = player.getEyePosition();
+        double dx = anchorCenter.x - eyes.x;
+        double dy = anchorCenter.y - eyes.y;
+        double dz = anchorCenter.z - eyes.z;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) Math.toDegrees(-Math.atan2(dy, dist));
+
+        float origYaw = player.getYRot();
+        float origPitch = player.getXRot();
+
+        // Send rotation toward anchor
+        Minecraft.getInstance().getConnection().send(new ServerboundMovePlayerPacket.Rot(
+            yaw, pitch, player.onGround(), player.horizontalCollision));
+
+        // Interact with anchor
+        gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+        ticksSinceLastInteraction = 0;
+
+        // Restore original rotation
+        Minecraft.getInstance().getConnection().send(new ServerboundMovePlayerPacket.Rot(
+            origYaw, origPitch, player.onGround(), player.horizontalCollision));
     }
 
     /**

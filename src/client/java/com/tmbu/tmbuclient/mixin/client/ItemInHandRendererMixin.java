@@ -1,7 +1,7 @@
 package com.tmbu.tmbuclient.mixin.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.tmbu.tmbuclient.module.impl.HandView;
+import com.tmbu.tmbuclient.module.impl.render.HandView;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;

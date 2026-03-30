@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
 import com.tmbu.tmbuclient.event.events.AttackEntityEvent;

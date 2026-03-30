@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -142,7 +142,7 @@ public class AutoCrystal extends Module {
      * Exposed for AutoDoubleHand to check if we're actively placing.
      * True when enabled and we placed within the last placeDelay window.
      */
-    static volatile AutoCrystal activeInstance = null;
+    public static volatile AutoCrystal activeInstance = null;
 
     private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
 
@@ -241,10 +241,8 @@ public class AutoCrystal extends Module {
                 if (!(noBreakOnSword.getValue() && isSword(player))) {
                     EndCrystal looked = getLookedCrystal(client, player);
                     if (looked != null && isCrystalWorthBreaking(player, looked, targets)) {
-                        // gameMode.attack() sends ANIMATION + INTERACT_ENTITY internally.
-                        // Do NOT call player.swing() — that would double-send ANIMATION
-                        // and trigger PacketOrderB "post-attack".
                         gameMode.attack(player, looked);
+                        player.swing(InteractionHand.MAIN_HAND);
                         breakTimer.reset();
                         dbg("Break crystal at " + fmtPos(looked.position()));
                         return; // ONE action per tick — don't also place
@@ -599,13 +597,14 @@ public class AutoCrystal extends Module {
     // ── Utility methods ──────────────────────────────────────────────────────
 
     /**
-     * Returns true if any target entity has its feet (bounding box minY) at or above
-     * the given Y level. Used by targetAboveBase to ensure we only place/break
-     * crystals when an enemy is standing on or above the base block.
+     * Returns true if any target entity has its feet at or above the given Y level,
+     * OR if the target is airborne (not on ground). Airborne targets are valid
+     * because they'll fall onto the crystal's explosion area.
      */
     private static boolean isEnemyAtOrAbove(Level level, LocalPlayer self, double minY, List<Entity> targets) {
         for (Entity target : targets) {
             if (target.getBoundingBox().minY >= minY) return true;
+            if (!target.onGround()) return true;
         }
         return false;
     }

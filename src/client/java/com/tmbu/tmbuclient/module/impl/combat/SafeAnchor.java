@@ -1,4 +1,4 @@
-package com.tmbu.tmbuclient.module.impl;
+package com.tmbu.tmbuclient.module.impl.combat;
 
 import com.tmbu.tmbuclient.event.EventBus;
 import com.tmbu.tmbuclient.event.events.PreMotionEvent;
@@ -188,11 +188,6 @@ public class SafeAnchor extends Module {
             return false;
         }
 
-        if (isPlayerBlockingShield(player, anchorPos, level)) {
-            dbg("Player is blocking shield position, skipping");
-            return false;
-        }
-
         float selfDamage = DamageUtils.anchorDamage(player, Vec3.atCenterOf(anchorPos));
         if (selfDamage < damageThreshold.getValue()) {
             dbg("Damage %.1f below threshold", selfDamage);
@@ -210,9 +205,13 @@ public class SafeAnchor extends Module {
         }
 
         // Already holding glowstone — place immediately (one action this tick)
+        // Must sneak to prevent charging the anchor when clicking near it
         InteractionHand hand = getGlowstoneHand(player);
         if (hand != null) {
+            boolean wasSneaking = player.isShiftKeyDown();
+            player.setShiftKeyDown(true);
             gameMode.useItemOn(player, hand, placeHit);
+            player.setShiftKeyDown(wasSneaking);
             ticksSinceLastPlace = 0;
             dbg("Placed shield at %s (immediate)", shieldPos);
             return true;
@@ -241,7 +240,10 @@ public class SafeAnchor extends Module {
         BlockHitResult placeHit = findPlaceTarget(level, shieldPos, anchorPos, player);
         if (placeHit == null) { dbg("No valid placement target on deferred tick"); return false; }
 
+        boolean wasSneaking2 = player.isShiftKeyDown();
+        player.setShiftKeyDown(true);
         gameMode.useItemOn(player, hand, placeHit);
+        player.setShiftKeyDown(wasSneaking2);
         ticksSinceLastPlace = 0;
         dbg("Placed shield at %s (deferred)", shieldPos);
         return true;
@@ -296,6 +298,7 @@ public class SafeAnchor extends Module {
         double dz = playerEyes.z - anchorCenter.z;
         boolean isDiagonal = Math.abs(Math.abs(dx) - Math.abs(dz)) < Math.max(Math.abs(dx), Math.abs(dz)) * 0.6;
 
+        // Candidates between player and anchor (blocks explosion rays toward player)
         BlockPos[] cardinals = { anchorPos.north(), anchorPos.south(), anchorPos.east(), anchorPos.west() };
         BlockPos[] diagonals = {
             anchorPos.offset(1, 0, 1), anchorPos.offset(1, 0, -1),
@@ -305,20 +308,39 @@ public class SafeAnchor extends Module {
         BlockPos[] primary   = isDiagonal ? diagonals : cardinals;
         BlockPos[] secondary = isDiagonal ? cardinals : diagonals;
 
-        BlockPos best = pickPlaceable(level, playerEyes, primary, anchorPos, player);
-        return best != null ? best : pickPlaceable(level, playerEyes, secondary, anchorPos, player);
+        // Sort candidates by how well they block rays from anchor to player
+        // (prefer positions that are between the anchor and the player)
+        BlockPos best = pickBestShield(level, playerEyes, anchorCenter, primary, anchorPos, player);
+        return best != null ? best : pickBestShield(level, playerEyes, anchorCenter, secondary, anchorPos, player);
     }
 
-    private BlockPos pickPlaceable(Level level, Vec3 eyes, BlockPos[] candidates,
-                                   BlockPos anchorPos, LocalPlayer player) {
+    private BlockPos pickBestShield(Level level, Vec3 playerEyes, Vec3 anchorCenter,
+                                    BlockPos[] candidates, BlockPos anchorPos, LocalPlayer player) {
         BlockPos best = null;
-        double bestDist = Double.MAX_VALUE;
+        double bestScore = -1;
+
+        Vec3 dirToPlayer = playerEyes.subtract(anchorCenter).normalize();
+
         for (BlockPos c : candidates) {
             if (!level.getBlockState(c).canBeReplaced()) continue;
             if (findPlaceTarget(level, c, anchorPos, player) == null) continue;
-            double d = eyes.distanceToSqr(Vec3.atCenterOf(c));
-            if (d < bestDist) { bestDist = d; best = c; }
+
+            // Skip if entity is blocking
+            net.minecraft.world.phys.AABB blockBox = new net.minecraft.world.phys.AABB(c);
+            if (!level.getEntitiesOfClass(net.minecraft.world.entity.Entity.class, blockBox,
+                    e -> e.isAlive() && !e.isSpectator()).isEmpty()) continue;
+
+            // Score: how well does this position block rays from anchor to player?
+            // Higher dot product = more directly between anchor and player
+            Vec3 dirToCandidate = Vec3.atCenterOf(c).subtract(anchorCenter).normalize();
+            double dot = dirToPlayer.dot(dirToCandidate);
+
+            if (dot > bestScore) {
+                bestScore = dot;
+                best = c;
+            }
         }
+
         return best;
     }
 
@@ -328,27 +350,6 @@ public class SafeAnchor extends Module {
         for (int[] d : new int[][]{ {1,0,1}, {1,0,-1}, {-1,0,1}, {-1,0,-1} })
             if (level.getBlockState(pos.offset(d[0], d[1], d[2])).is(Blocks.GLOWSTONE)) return true;
         return false;
-    }
-
-    private static boolean isPlayerBlockingShield(LocalPlayer player, BlockPos anchorPos, Level level) {
-        net.minecraft.world.phys.AABB playerBox = player.getBoundingBox();
-
-        BlockPos[] candidates = {
-            anchorPos.north(), anchorPos.south(), anchorPos.east(), anchorPos.west(),
-            anchorPos.offset(1, 0, 1), anchorPos.offset(1, 0, -1),
-            anchorPos.offset(-1, 0, 1), anchorPos.offset(-1, 0, -1)
-        };
-
-        int validCount = 0;
-        int blockedCount = 0;
-        for (BlockPos c : candidates) {
-            if (!level.getBlockState(c).canBeReplaced()) continue;
-            validCount++;
-            net.minecraft.world.phys.AABB blockBox = new net.minecraft.world.phys.AABB(c);
-            if (playerBox.intersects(blockBox)) blockedCount++;
-        }
-
-        return validCount > 0 && blockedCount >= validCount;
     }
 
     private static boolean isHoldingRelevant(LocalPlayer p) {
