@@ -8,6 +8,7 @@
 		"AvatarRendererMixin",
 		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
+		"LocalPlayerAttackMixin",
 		"MixinLocalPlayer"
 	],
 	"injectors": {

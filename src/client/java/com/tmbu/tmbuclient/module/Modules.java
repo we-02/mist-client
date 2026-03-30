@@ -25,5 +25,8 @@ public final class Modules {
 		ModuleRegistry.add(PopChams::new);
 		ModuleRegistry.add(Trajectories::new);
 		ModuleRegistry.add(AimAssist::new);
+		ModuleRegistry.add(KeepSprint::new);
+		ModuleRegistry.add(SuperKnockback::new);
+		ModuleRegistry.add(TriggerBot::new);
 	}
 }
