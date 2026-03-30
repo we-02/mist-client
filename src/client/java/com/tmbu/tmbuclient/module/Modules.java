@@ -28,5 +28,7 @@ public final class Modules {
 		ModuleRegistry.add(KeepSprint::new);
 		ModuleRegistry.add(SuperKnockback::new);
 		ModuleRegistry.add(TriggerBot::new);
+		ModuleRegistry.add(HandView::new);
+		ModuleRegistry.add(Ambience::new);
 	}
 }

@@ -28,9 +28,12 @@ import java.util.function.Consumer;
 /**
  * AutoAnchor — charges and detonates respawn anchors.
  *
- * All packet-sending actions are queued and executed one-per-tick to avoid
- * Grim's PacketOrderE (slot switch during interaction) and MultiPlace
- * (multiple placements in one tick).
+ * Timing safety for Grim:
+ * - One action per tick via action queue (avoids PacketOrderE + MultiPlace)
+ * - Global interaction cooldown prevents back-to-back useItemOn calls
+ * - Checks SafeAnchor.isBusy() before detonating
+ * - Clears stale queue when switching to a different anchor
+ * - Validates block state before every interaction
  */
 public class AutoAnchorExploder extends Module {
 
@@ -50,6 +53,14 @@ public class AutoAnchorExploder extends Module {
 
     /** One action per tick queue. Each entry is a Runnable that sends exactly one packet. */
     private final ArrayDeque<Runnable> actionQueue = new ArrayDeque<>();
+
+    /**
+     * Global interaction cooldown — ticks since last useItemOn call.
+     * Prevents sending two block interactions too close together which
+     * triggers MultiPlace even across charge→detonate transitions.
+     */
+    private int ticksSinceLastInteraction = 0;
+    private static final int MIN_INTERACTION_GAP = 2;
 
     private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
 
@@ -77,6 +88,7 @@ public class AutoAnchorExploder extends Module {
         lastChargeTime = 0;
         preSwitchHotbarSlot = null;
         actionQueue.clear();
+        ticksSinceLastInteraction = MIN_INTERACTION_GAP;
     }
 
     private void onPreMotion(Minecraft client) {
@@ -84,6 +96,14 @@ public class AutoAnchorExploder extends Module {
         MultiPlayerGameMode gm = client.gameMode;
         Level world = client.level;
         if (player == null || gm == null || world == null) return;
+
+        ticksSinceLastInteraction++;
+
+        // Wait for SafeAnchor to finish its placement sequence
+        SafeAnchor safeAnchor = getSafeAnchor();
+        if (safeAnchor != null && safeAnchor.isEnabled() && safeAnchor.isBusy()) {
+            return;
+        }
 
         // Execute one queued action per tick (avoids PacketOrderE + MultiPlace)
         if (!actionQueue.isEmpty()) {
@@ -102,14 +122,22 @@ public class AutoAnchorExploder extends Module {
         if (client.hitResult == null || client.hitResult.getType() != HitResult.Type.BLOCK) return;
         BlockHitResult hit = (BlockHitResult) client.hitResult;
         BlockPos pos = hit.getBlockPos();
+
+        // Re-read block state fresh — don't rely on stale data
         BlockState state = world.getBlockState(pos);
         if (!state.is(Blocks.RESPAWN_ANCHOR)) return;
 
-        handleAnchor(client, player, gm, pos, state, hit);
+        // If we switched to a different anchor, clear any stale queue
+        if (currentAnchorPos != null && !currentAnchorPos.equals(pos) && !actionQueue.isEmpty()) {
+            actionQueue.clear();
+            isCharging = false;
+        }
+
+        handleAnchor(client, player, gm, world, pos, state, hit);
     }
 
     private void handleAnchor(Minecraft client, LocalPlayer player, MultiPlayerGameMode gm,
-                              BlockPos pos, BlockState state, BlockHitResult hit) {
+                              Level world, BlockPos pos, BlockState state, BlockHitResult hit) {
         int charges = state.getValue(RespawnAnchorBlock.CHARGE);
         int min = (int) Math.round(minCharges.getValue());
         int max = (int) Math.round(maxCharges.getValue());
@@ -117,41 +145,43 @@ public class AutoAnchorExploder extends Module {
 
         // ── DETONATE ─────────────────────────────────────────────────────────
         if (autoDetonate.getValue() && currentAnchorPos != null
-            && currentAnchorPos.equals(pos) && charges >= min && charges <= max) {
+            && currentAnchorPos.equals(pos) && charges >= min && charges <= max
+            && !isCharging) {
+
+            // Don't detonate too quickly after the last interaction (charge/shield)
+            if (ticksSinceLastInteraction < MIN_INTERACTION_GAP) return;
+
             isCharging = false;
             currentAnchorPos = null;
 
-            // Queue: SafeAnchor shield → slot restore → detonate
-            // Each step is a separate tick
+            // Try SafeAnchor shield first
             SafeAnchor safeAnchor = getSafeAnchor();
             if (safeAnchor != null && safeAnchor.isEnabled()) {
                 boolean shieldQueued = safeAnchor.placeShield(pos);
                 if (shieldQueued) {
-                    // SafeAnchor may have queued a slot switch this tick.
-                    // Its placement happens next tick (deferred).
-                    // We queue our detonate actions after that.
-                    // Tick N: SafeAnchor slot switch (already happened)
-                    // Tick N+1: SafeAnchor placement (its pending)
-                    // Tick N+2: our slot restore (queued below)
-                    // Tick N+3: our detonate (queued below)
-                    queueDetonation(player, gm, pos, hit);
+                    queueDetonation(player, gm, pos);
                     return;
                 }
             }
 
             // No shield — ensure we're NOT holding glowstone, then detonate
-            ensureNotHoldingGlowstone(player);
             if (player.getMainHandItem().is(Items.GLOWSTONE)) {
-                // Still glowstone (no other slot to switch to) — queue restore + detonate
-                if (preSwitchHotbarSlot != null) {
-                    final int restoreSlot = preSwitchHotbarSlot;
-                    preSwitchHotbarSlot = null;
-                    actionQueue.add(() -> player.getInventory().setSelectedSlot(restoreSlot));
-                    actionQueue.add(() -> gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos)));
+                // Need to switch away from glowstone first (separate tick)
+                ensureNotHoldingGlowstone(player);
+                if (player.getMainHandItem().is(Items.GLOWSTONE)) {
+                    // All slots are glowstone — can't detonate
+                    return;
                 }
-                // else: can't detonate without a non-glowstone slot
+                // Switched slot this tick — queue detonate for next tick
+                actionQueue.add(() -> {
+                    if (!player.getMainHandItem().is(Items.GLOWSTONE)) {
+                        gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                        ticksSinceLastInteraction = 0;
+                    }
+                });
             } else {
                 gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                ticksSinceLastInteraction = 0;
             }
             return;
         }
@@ -163,9 +193,10 @@ public class AutoAnchorExploder extends Module {
                 isCharging = true;
             }
 
-            if (isCharging && currentAnchorPos.equals(pos)) {
-                if (System.currentTimeMillis() - lastChargeTime >= delay) {
-                    // Split slot switch and charge into separate ticks
+            if (isCharging && currentAnchorPos != null && currentAnchorPos.equals(pos)) {
+                if (System.currentTimeMillis() - lastChargeTime >= delay
+                    && ticksSinceLastInteraction >= MIN_INTERACTION_GAP) {
+
                     InteractionHand hand = getGlowstoneHand(player);
                     if (hand == null && switchItems.getValue()) {
                         int slot = findGlowstoneSlot(player);
@@ -174,11 +205,20 @@ public class AutoAnchorExploder extends Module {
                                 int cur = player.getInventory().getSelectedSlot();
                                 if (cur != slot) preSwitchHotbarSlot = cur;
                             }
-                            // Tick N: switch slot
+                            // Tick N: switch slot (no interaction packet)
                             player.getInventory().setSelectedSlot(slot);
-                            // Tick N+1: charge
-                            actionQueue.add(() -> gm.useItemOn(player, InteractionHand.MAIN_HAND,
-                                new BlockHitResult(hit.getLocation(), hit.getDirection(), pos, false)));
+                            // Tick N+1: charge (one interaction packet)
+                            final BlockPos chargePos = pos;
+                            actionQueue.add(() -> {
+                                // Re-validate: is it still an anchor? Still needs charges?
+                                BlockState freshState = player.level().getBlockState(chargePos);
+                                if (freshState.is(Blocks.RESPAWN_ANCHOR)
+                                    && freshState.getValue(RespawnAnchorBlock.CHARGE) < max) {
+                                    gm.useItemOn(player, InteractionHand.MAIN_HAND,
+                                        new BlockHitResult(hit.getLocation(), hit.getDirection(), chargePos, false));
+                                    ticksSinceLastInteraction = 0;
+                                }
+                            });
                             lastChargeTime = System.currentTimeMillis();
                             return;
                         }
@@ -188,30 +228,31 @@ public class AutoAnchorExploder extends Module {
                         gm.useItemOn(player, useHand,
                             new BlockHitResult(hit.getLocation(), hit.getDirection(), pos, false));
                         lastChargeTime = System.currentTimeMillis();
+                        ticksSinceLastInteraction = 0;
                     }
                 }
             }
         }
 
-        if (isCharging && currentAnchorPos.equals(pos) && charges >= max) {
+        // Check if charging is complete
+        if (isCharging && currentAnchorPos != null && currentAnchorPos.equals(pos) && charges >= max) {
             isCharging = false;
-            currentAnchorPos = null;
+            // Don't clear currentAnchorPos — we need it for the detonate check
         }
     }
 
     /**
      * Queue the detonation sequence after SafeAnchor has placed its shield.
      * SafeAnchor's deferred placement will execute on the next tick,
-     * so we queue our actions after that.
+     * so we queue our actions after that with proper spacing.
      */
-    private void queueDetonation(LocalPlayer player, MultiPlayerGameMode gm,
-                                 BlockPos pos, BlockHitResult hit) {
+    private void queueDetonation(LocalPlayer player, MultiPlayerGameMode gm, BlockPos pos) {
         // Tick +1: SafeAnchor's deferred placement runs (handled by SafeAnchor)
-        // Tick +2: empty tick (let server process the placement)
-        actionQueue.add(() -> {}); // spacer
+        // We wait by checking isBusy() in onPreMotion — but also add spacers
+        // in case the busy check doesn't catch it.
+        actionQueue.add(() -> {}); // spacer — let SafeAnchor finish
 
-        // Tick +3: ALWAYS restore slot to non-glowstone before detonating
-        // Detonating with glowstone in hand charges the anchor instead!
+        // Tick +2: restore slot to non-glowstone
         actionQueue.add(() -> {
             ensureNotHoldingGlowstone(player);
             if (preSwitchHotbarSlot != null) {
@@ -220,11 +261,16 @@ public class AutoAnchorExploder extends Module {
             }
         });
 
-        // Tick +4: detonate (now guaranteed to not be holding glowstone)
+        // Tick +3: detonate (guaranteed not holding glowstone)
         actionQueue.add(() -> {
-            // Final safety check — if somehow still holding glowstone, don't detonate
             if (!player.getMainHandItem().is(Items.GLOWSTONE)) {
-                gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                // Re-validate: is the anchor still charged?
+                BlockState freshState = player.level().getBlockState(pos);
+                if (freshState.is(Blocks.RESPAWN_ANCHOR)
+                    && freshState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
+                    gm.useItemOn(player, InteractionHand.MAIN_HAND, anchorHit(pos));
+                    ticksSinceLastInteraction = 0;
+                }
             }
         });
     }
@@ -238,20 +284,17 @@ public class AutoAnchorExploder extends Module {
 
     /**
      * If the player is holding glowstone, switch to the saved slot or find any
-     * non-glowstone hotbar slot. MUST be called before detonation to prevent
-     * accidentally charging the anchor.
+     * non-glowstone hotbar slot. MUST be called before detonation.
      */
     private void ensureNotHoldingGlowstone(LocalPlayer player) {
         if (!player.getMainHandItem().is(Items.GLOWSTONE)) return;
 
-        // Try saved slot first
         if (preSwitchHotbarSlot != null && preSwitchHotbarSlot >= 0 && preSwitchHotbarSlot <= 8) {
             player.getInventory().setSelectedSlot(preSwitchHotbarSlot);
             preSwitchHotbarSlot = null;
             return;
         }
 
-        // Find any non-glowstone slot
         for (int i = 0; i < 9; i++) {
             if (!player.getInventory().getItem(i).is(Items.GLOWSTONE)) {
                 player.getInventory().setSelectedSlot(i);

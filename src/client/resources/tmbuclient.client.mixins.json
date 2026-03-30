@@ -6,10 +6,13 @@
 	"client": [
 		"AbstractContainerScreenAccessor",
 		"AvatarRendererMixin",
+		"ClientLevelMixin",
 		"ClientboundEntityEventMixin",
 		"EntityRendererMixin",
+		"ItemInHandRendererMixin",
 		"LocalPlayerAttackMixin",
-		"MixinLocalPlayer"
+		"MixinLocalPlayer",
+		"SkyRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

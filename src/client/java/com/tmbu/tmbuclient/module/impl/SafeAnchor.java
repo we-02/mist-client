@@ -29,11 +29,11 @@ import java.util.function.Consumer;
  * SafeAnchor — places a glowstone block between you and a charged respawn anchor
  * before detonation to reduce self-damage.
  *
- * Edge cases handled:
- * - Validates placement target exists BEFORE switching slots
- * - Restores slot immediately if deferred placement fails
- * - Checks reach distance to placement target
- * - Re-validates everything on the deferred tick
+ * Timing safety:
+ * - Cooldown between shield placements prevents MultiPlace flags
+ * - Slot switch + placement always split across two ticks (PacketOrderE safe)
+ * - Busy flag prevents AutoAnchor from detonating mid-placement
+ * - Re-validates world state on deferred tick to handle fast block updates
  */
 public class SafeAnchor extends Module {
 
@@ -47,11 +47,17 @@ public class SafeAnchor extends Module {
         .group("Switching").visibleWhen(autoSwitch::getValue));
     private final BooleanSetting debug           = addSetting(new BooleanSetting("Debug", false));
 
-    private static final double MAX_REACH_SQ = 4.5 * 4.5; // vanilla interaction range squared
+    private static final double MAX_REACH_SQ = 4.5 * 4.5;
+    /** Minimum ticks between shield placements to avoid MultiPlace. */
+    private static final int PLACE_COOLDOWN_TICKS = 2;
 
     private int preSwitchSlot = -1;
     private BlockPos pendingPlaceShield = null;
     private BlockPos pendingPlaceAnchor = null;
+    /** Ticks since last shield placement — prevents rapid-fire placements. */
+    private int ticksSinceLastPlace = PLACE_COOLDOWN_TICKS;
+    /** True while we're in the middle of a slot-switch → deferred-place sequence. */
+    private boolean busy = false;
 
     private final Consumer<PreMotionEvent> preMotionHandler = e -> onPreMotion(e.client());
 
@@ -75,6 +81,8 @@ public class SafeAnchor extends Module {
         preSwitchSlot = -1;
         pendingPlaceShield = null;
         pendingPlaceAnchor = null;
+        ticksSinceLastPlace = PLACE_COOLDOWN_TICKS;
+        busy = false;
     }
 
     @Override
@@ -82,6 +90,15 @@ public class SafeAnchor extends Module {
         restoreSlot();
         pendingPlaceShield = null;
         pendingPlaceAnchor = null;
+        busy = false;
+    }
+
+    /**
+     * Returns true if SafeAnchor is in the middle of a placement sequence.
+     * AutoAnchor should NOT detonate while this is true.
+     */
+    public boolean isBusy() {
+        return busy;
     }
 
     private void onPreMotion(Minecraft client) {
@@ -90,6 +107,8 @@ public class SafeAnchor extends Module {
         Level level = client.level;
         if (player == null || gameMode == null || level == null) return;
 
+        ticksSinceLastPlace++;
+
         // Execute deferred placement from previous tick's slot switch
         if (pendingPlaceShield != null) {
             BlockPos shield = pendingPlaceShield;
@@ -97,7 +116,6 @@ public class SafeAnchor extends Module {
             pendingPlaceShield = null;
             pendingPlaceAnchor = null;
 
-            // Re-validate everything — world state may have changed since last tick
             boolean placed = false;
             if (level.getBlockState(shield).canBeReplaced()) {
                 placed = executePlacement(player, gameMode, level, shield, anchor);
@@ -106,18 +124,20 @@ public class SafeAnchor extends Module {
             }
 
             if (!placed) {
-                // Placement failed — restore slot immediately so we don't
-                // accidentally charge the anchor with glowstone
                 dbg("Deferred placement failed, restoring slot");
                 restoreSlot();
             }
+            // Mark not busy — AutoAnchor can proceed next tick
+            busy = false;
             return;
         }
 
-        // Restore slot from previous tick
-        restoreSlot();
+        // Restore slot from previous tick (only if not busy)
+        if (!busy) {
+            restoreSlot();
+        }
 
-        // Standalone mode
+        // Standalone mode — only trigger if not called by AutoAnchor
         if (onlyWhenHolding.getValue() && !isHoldingRelevant(player)) return;
 
         if (client.hitResult == null || client.hitResult.getType() != HitResult.Type.BLOCK) return;
@@ -137,7 +157,7 @@ public class SafeAnchor extends Module {
 
     /**
      * Called by AutoAnchor before detonation.
-     * @return true if a shield will be placed (caller should wait)
+     * @return true if a shield will be placed (caller should wait for isBusy() == false)
      */
     public boolean placeShield(BlockPos anchorPos) {
         Minecraft mc = Minecraft.getInstance();
@@ -146,19 +166,28 @@ public class SafeAnchor extends Module {
         Level level = mc.level;
         if (player == null || gameMode == null || level == null) return false;
 
+        // Don't place if we're already busy with a previous placement
+        if (busy) {
+            dbg("Already busy with a placement");
+            return true; // tell caller to wait
+        }
+
+        // Cooldown — prevent rapid-fire placements (MultiPlace)
+        if (ticksSinceLastPlace < PLACE_COOLDOWN_TICKS) {
+            dbg("Placement cooldown (%d/%d)", ticksSinceLastPlace, PLACE_COOLDOWN_TICKS);
+            return false;
+        }
+
         if (hasAdjacentGlowstone(level, anchorPos)) {
             dbg("Already has glowstone neighbor");
             return false;
         }
 
-        // Don't bother if the anchor is floating (air below) — placement will fail
         if (level.getBlockState(anchorPos.below()).isAir()) {
             dbg("Anchor has air below, skipping shield");
             return false;
         }
 
-        // Skip if the player's body is blocking the shield position
-        // (player standing between anchor and shield spot prevents placement)
         if (isPlayerBlockingShield(player, anchorPos, level)) {
             dbg("Player is blocking shield position, skipping");
             return false;
@@ -170,39 +199,37 @@ public class SafeAnchor extends Module {
             return false;
         }
 
-        // Find shield position
         BlockPos shieldPos = findShieldPosition(level, player, anchorPos);
         if (shieldPos == null) { dbg("No valid shield position"); return false; }
         if (!level.getBlockState(shieldPos).canBeReplaced()) { dbg("Shield pos occupied"); return false; }
 
-        // CRITICAL: Validate placement target exists BEFORE switching slots
-        // This prevents the edge case where we switch to glowstone but can't place
         BlockHitResult placeHit = findPlaceTarget(level, shieldPos, anchorPos, player);
         if (placeHit == null) {
-            dbg("No valid placement target — skipping shield to avoid accidental charge");
+            dbg("No valid placement target — skipping shield");
             return false;
         }
 
-        // Already holding glowstone — place immediately
+        // Already holding glowstone — place immediately (one action this tick)
         InteractionHand hand = getGlowstoneHand(player);
         if (hand != null) {
             gameMode.useItemOn(player, hand, placeHit);
+            ticksSinceLastPlace = 0;
             dbg("Placed shield at %s (immediate)", shieldPos);
             return true;
         }
 
-        // Need slot switch — validate we have glowstone first
+        // Need slot switch — split across two ticks
         if (!autoSwitch.getValue()) return false;
         int slot = findGlowstoneSlot(player);
         if (slot == -1) { dbg("No glowstone in hotbar"); return false; }
 
-        // Switch and defer placement
         if (switchBack.getValue()) preSwitchSlot = player.getInventory().getSelectedSlot();
         player.getInventory().setSelectedSlot(slot);
         dbg("Switched to slot %d, deferring placement", slot);
 
         pendingPlaceShield = shieldPos;
         pendingPlaceAnchor = anchorPos;
+        busy = true;
         return true;
     }
 
@@ -211,19 +238,15 @@ public class SafeAnchor extends Module {
         InteractionHand hand = getGlowstoneHand(player);
         if (hand == null) { dbg("No glowstone in hand"); return false; }
 
-        // Re-validate placement target (world may have changed)
         BlockHitResult placeHit = findPlaceTarget(level, shieldPos, anchorPos, player);
         if (placeHit == null) { dbg("No valid placement target on deferred tick"); return false; }
 
         gameMode.useItemOn(player, hand, placeHit);
+        ticksSinceLastPlace = 0;
         dbg("Placed shield at %s (deferred)", shieldPos);
         return true;
     }
 
-    /**
-     * Find a solid block adjacent to shieldPos (NOT the anchor) to click against.
-     * Also checks that the click target is within reach distance.
-     */
     private BlockHitResult findPlaceTarget(Level level, BlockPos shieldPos, BlockPos anchorPos, LocalPlayer player) {
         Vec3 eyePos = player.getEyePosition();
 
@@ -233,14 +256,12 @@ public class SafeAnchor extends Module {
             BlockState neighborState = level.getBlockState(neighbor);
             if (neighborState.isAir() || neighborState.canBeReplaced()) continue;
 
-            // Check reach
             Vec3 cursor = computeFaceCursor(neighbor, dir.getOpposite());
             if (eyePos.distanceToSqr(cursor) > MAX_REACH_SQ) continue;
 
             return new BlockHitResult(cursor, dir.getOpposite(), neighbor, false);
         }
 
-        // Fallback: ground below
         BlockPos below = shieldPos.below();
         if (!below.equals(anchorPos) && !level.getBlockState(below).isAir()
             && !level.getBlockState(below).canBeReplaced()) {
@@ -284,22 +305,16 @@ public class SafeAnchor extends Module {
         BlockPos[] primary   = isDiagonal ? diagonals : cardinals;
         BlockPos[] secondary = isDiagonal ? cardinals : diagonals;
 
-        // Only consider positions that have a valid placement target
-        // This prevents finding a shield position we can't actually place at
         BlockPos best = pickPlaceable(level, playerEyes, primary, anchorPos, player);
         return best != null ? best : pickPlaceable(level, playerEyes, secondary, anchorPos, player);
     }
 
-    /**
-     * Pick the closest candidate that is replaceable AND has a valid placement target.
-     */
     private BlockPos pickPlaceable(Level level, Vec3 eyes, BlockPos[] candidates,
                                    BlockPos anchorPos, LocalPlayer player) {
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
         for (BlockPos c : candidates) {
             if (!level.getBlockState(c).canBeReplaced()) continue;
-            // Must have a solid neighbor (not the anchor) to click against, within reach
             if (findPlaceTarget(level, c, anchorPos, player) == null) continue;
             double d = eyes.distanceToSqr(Vec3.atCenterOf(c));
             if (d < bestDist) { bestDist = d; best = c; }
@@ -318,14 +333,12 @@ public class SafeAnchor extends Module {
     private static boolean isPlayerBlockingShield(LocalPlayer player, BlockPos anchorPos, Level level) {
         net.minecraft.world.phys.AABB playerBox = player.getBoundingBox();
 
-        // Check all horizontal candidates (cardinal + diagonal)
         BlockPos[] candidates = {
             anchorPos.north(), anchorPos.south(), anchorPos.east(), anchorPos.west(),
             anchorPos.offset(1, 0, 1), anchorPos.offset(1, 0, -1),
             anchorPos.offset(-1, 0, 1), anchorPos.offset(-1, 0, -1)
         };
 
-        // Count how many valid positions the player is blocking
         int validCount = 0;
         int blockedCount = 0;
         for (BlockPos c : candidates) {
@@ -335,7 +348,6 @@ public class SafeAnchor extends Module {
             if (playerBox.intersects(blockBox)) blockedCount++;
         }
 
-        // If the player is blocking ALL valid positions, skip
         return validCount > 0 && blockedCount >= validCount;
     }
 
