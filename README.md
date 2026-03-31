@@ -30,4 +30,4 @@ Download the `.jar` file from releases and add to your 1.21.11 Fabric instance
 ## Special thanks:
 - Meteor Client (HUD modules)
 - Liquid Bounce (for inspiration for SuperKnockback and Aim Assist)
-- 
+
